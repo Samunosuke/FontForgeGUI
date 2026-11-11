@@ -4,8 +4,11 @@
 #include "model/GlyphListModel.hpp"
 #include "model/UnicodeRangeFilter.hpp"
 #include "ui/ExportFontDialog.hpp"
+#include "ui/FontMetadataDialog.hpp"
 #include "ui/GlyphGridDelegate.hpp"
+#include "ui/GlyphGridView.hpp"
 #include "ui/GlyphInspectorPanel.hpp"
+#include "ui/ValidationPanel.hpp"
 
 #include <QAction>
 #include <QCheckBox>
@@ -29,12 +32,18 @@
 #include <QStatusBar>
 #include <QToolBar>
 #include <QVBoxLayout>
+#include <algorithm>
 
 namespace ffgui {
 
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     qRegisterMetaType<FontDocumentSnapshot>("ffgui::FontDocumentSnapshot");
+    qRegisterMetaType<FontSummary>("ffgui::FontSummary");
+    qRegisterMetaType<GlyphSummary>("ffgui::GlyphSummary");
     qRegisterMetaType<ExportOptions>("ffgui::ExportOptions");
+    qRegisterMetaType<GlyphMetadataUpdate>("ffgui::GlyphMetadataUpdate");
+    qRegisterMetaType<FontMetadataUpdate>("ffgui::FontMetadataUpdate");
+    qRegisterMetaType<FontValidationReport>("ffgui::FontValidationReport");
 
     m_areaConfig = CustomGlyphAreaConfig::createDefault();
 
@@ -53,6 +62,16 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     connect(m_worker, &FontWorker::fontLoadFailed, this, &MainWindow::onFontLoadFailed);
     connect(m_worker, &FontWorker::fontExported, this, &MainWindow::onFontExported);
     connect(m_worker, &FontWorker::fontExportFailed, this, &MainWindow::onFontExportFailed);
+    connect(m_worker, &FontWorker::glyphMetadataUpdated, this,
+            &MainWindow::onGlyphMetadataUpdated);
+    connect(m_worker, &FontWorker::glyphMetadataUpdateFailed, this,
+            &MainWindow::onGlyphMetadataUpdateFailed);
+    connect(m_worker, &FontWorker::fontMetadataUpdated, this, &MainWindow::onFontMetadataUpdated);
+    connect(m_worker, &FontWorker::fontMetadataUpdateFailed, this,
+            &MainWindow::onFontMetadataUpdateFailed);
+    connect(m_worker, &FontWorker::fontValidated, this, &MainWindow::onFontValidated);
+    connect(m_worker, &FontWorker::fontValidationFailed, this,
+            &MainWindow::onFontValidationFailed);
     connect(m_worker, &FontWorker::fontClosed, this, &MainWindow::onFontClosed);
     connect(m_worker, &FontWorker::logMessage, this, &MainWindow::onLogMessage);
     connect(m_worker, &FontWorker::progressUpdated, this, &MainWindow::onProgressUpdated);
@@ -158,7 +177,7 @@ void MainWindow::setupUi() {
     m_model = new GlyphListModel(this);
     m_delegate = new GlyphGridDelegate(this);
 
-    m_gridView = new QListView(splitter);
+    m_gridView = new GlyphGridView(splitter);
     m_gridView->setModel(m_model);
     m_gridView->setItemDelegate(m_delegate);
     m_gridView->setViewMode(QListView::IconMode);
@@ -168,6 +187,7 @@ void MainWindow::setupUi() {
     m_gridView->setSpacing(4);
     m_gridView->setSelectionMode(QAbstractItemView::SingleSelection);
     m_gridView->setMouseTracking(true);
+    m_gridView->setEmptyDropEnabled(true);
 
     m_inspector = new GlyphInspectorPanel(splitter);
 
@@ -179,6 +199,14 @@ void MainWindow::setupUi() {
     rootLayout->addWidget(splitter, 1);
     setCentralWidget(central);
 
+    // Validation Dock (bottom)
+    m_validationDock = new QDockWidget(tr("Font Validation"), this);
+    m_validationDock->setAllowedAreas(Qt::BottomDockWidgetArea);
+    m_validationPanel = new ValidationPanel(m_validationDock);
+    m_validationDock->setWidget(m_validationPanel);
+    addDockWidget(Qt::BottomDockWidgetArea, m_validationDock);
+    m_validationDock->hide();
+
     // Log Dock (bottom, compact)
     auto* logDock = new QDockWidget(tr("FontForge Log"), this);
     logDock->setAllowedAreas(Qt::BottomDockWidgetArea);
@@ -189,6 +217,8 @@ void MainWindow::setupUi() {
     logDock->setWidget(m_logView);
     addDockWidget(Qt::BottomDockWidgetArea, logDock);
     logDock->hide();
+
+    tabifyDockWidget(m_validationDock, logDock);
 
     // Status bar
     m_progressBar = new QProgressBar(this);
@@ -208,6 +238,27 @@ void MainWindow::setupUi() {
     connect(m_zoomSlider, &QSlider::valueChanged, this, &MainWindow::onZoomChanged);
     connect(m_gridView->selectionModel(), &QItemSelectionModel::selectionChanged, this,
             &MainWindow::onGlyphSelectionChanged);
+    connect(m_gridView, &GlyphGridView::fontFileDropped, this, &MainWindow::openFontPath);
+
+    connect(m_inspector, &GlyphInspectorPanel::glyphMetadataEditRequested, this,
+            [this](const GlyphMetadataUpdate& update) {
+                setBusy(true, tr("Updating glyph #%1…").arg(update.gid));
+                QMetaObject::invokeMethod(m_worker, "updateGlyphMetadata", Qt::QueuedConnection,
+                                          Q_ARG(ffgui::GlyphMetadataUpdate, update));
+            });
+    connect(m_inspector, &GlyphInspectorPanel::editFontMetadataRequested, this,
+            &MainWindow::onEditFontMetadataClicked);
+
+    connect(m_validationPanel, &ValidationPanel::validateRequested, this, [this](bool force) {
+        if (!m_hasOpenFont) {
+            return;
+        }
+        setBusy(true, tr("Validating font…"));
+        QMetaObject::invokeMethod(m_worker, "validateFont", Qt::QueuedConnection,
+                                  Q_ARG(bool, force));
+    });
+    connect(m_validationPanel, &ValidationPanel::glyphSelected, this,
+            &MainWindow::onValidationGlyphSelected);
 }
 
 void MainWindow::setupMenusAndToolbar() {
@@ -222,6 +273,14 @@ void MainWindow::setupMenusAndToolbar() {
     fileMenu->addSeparator();
     fileMenu->addAction(tr("E&xit"), QKeySequence::Quit, this, &QWidget::close);
 
+    auto* fontMenu = menuBar()->addMenu(tr("F&ont"));
+    m_fontMetaAction = fontMenu->addAction(tr("Font &Metadata…"),
+                                           QKeySequence(QStringLiteral("Ctrl+M")), this,
+                                           &MainWindow::onEditFontMetadataClicked);
+    m_validateAction = fontMenu->addAction(tr("&Validate Font…"),
+                                           QKeySequence(QStringLiteral("Ctrl+Shift+V")), this,
+                                           &MainWindow::onValidateFontClicked);
+
     auto* viewMenu = menuBar()->addMenu(tr("&View"));
     for (QDockWidget* dock : findChildren<QDockWidget*>()) {
         viewMenu->addAction(dock->toggleViewAction());
@@ -232,9 +291,14 @@ void MainWindow::setupMenusAndToolbar() {
     toolbar->addAction(m_openAction);
     toolbar->addAction(m_exportAction);
     toolbar->addAction(m_closeAction);
+    toolbar->addSeparator();
+    toolbar->addAction(m_fontMetaAction);
+    toolbar->addAction(m_validateAction);
 
     m_exportAction->setEnabled(false);
     m_closeAction->setEnabled(false);
+    m_fontMetaAction->setEnabled(false);
+    m_validateAction->setEnabled(false);
     m_saveAreasBtn->setEnabled(false);
 }
 
@@ -279,10 +343,36 @@ void MainWindow::onCloseFontClicked() {
     QMetaObject::invokeMethod(m_worker, "closeFont", Qt::QueuedConnection);
 }
 
+void MainWindow::onEditFontMetadataClicked() {
+    if (!m_hasOpenFont) {
+        return;
+    }
+    FontMetadataDialog dlg(m_model->fontSummary(), this);
+    if (dlg.exec() != QDialog::Accepted) {
+        return;
+    }
+    const FontMetadataUpdate update = dlg.metadataUpdate();
+    setBusy(true, tr("Updating font metadata…"));
+    QMetaObject::invokeMethod(m_worker, "updateFontMetadata", Qt::QueuedConnection,
+                              Q_ARG(ffgui::FontMetadataUpdate, update));
+}
+
+void MainWindow::onValidateFontClicked() {
+    if (!m_hasOpenFont) {
+        return;
+    }
+    m_validationDock->show();
+    m_validationDock->raise();
+    setBusy(true, tr("Validating font…"));
+    QMetaObject::invokeMethod(m_worker, "validateFont", Qt::QueuedConnection, Q_ARG(bool, true));
+}
+
 void MainWindow::onFontLoaded(const FontDocumentSnapshot& snapshot) {
     setBusy(false);
     m_hasOpenFont = true;
+    m_modified = false;
     m_currentFontPath = snapshot.summary.filePath;
+    m_gridView->setEmptyDropEnabled(false);
 
     QString loadErr;
     const bool hadSidecar =
@@ -296,9 +386,13 @@ void MainWindow::onFontLoaded(const FontDocumentSnapshot& snapshot) {
     m_model->setDocument(snapshot);
     m_inspector->setFontSummary(snapshot.summary);
     m_inspector->setGlyph(nullptr);
+    m_validationPanel->setFontAvailable(true);
+    m_validationPanel->clear();
 
     m_exportAction->setEnabled(true);
     m_closeAction->setEnabled(true);
+    m_fontMetaAction->setEnabled(true);
+    m_validateAction->setEnabled(true);
     m_saveAreasBtn->setEnabled(true);
 
     if (m_model->rowCount() > 0) {
@@ -334,13 +428,80 @@ void MainWindow::onFontExportFailed(const QString& error) {
     statusBar()->showMessage(tr("Font export failed"), 5000);
 }
 
+void MainWindow::onGlyphMetadataUpdated(const GlyphSummary& glyph) {
+    setBusy(false);
+    m_modified = true;
+    m_model->updateGlyph(glyph);
+
+    const int row = m_model->rowForGid(glyph.gid);
+    if (row >= 0) {
+        const QModelIndex idx = m_model->index(row, 0);
+        m_gridView->setCurrentIndex(idx);
+        m_inspector->setGlyph(m_model->glyphAtRow(row));
+    } else {
+        m_inspector->setGlyph(&glyph);
+    }
+
+    updateWindowTitleAndCounts();
+    statusBar()->showMessage(
+        tr("Updated glyph #%1 (%2)").arg(glyph.gid).arg(glyph.name), 4000);
+}
+
+void MainWindow::onGlyphMetadataUpdateFailed(const QString& error) {
+    setBusy(false);
+    QMessageBox::warning(this, tr("Update Glyph Metadata Failed"), error);
+    statusBar()->showMessage(tr("Glyph metadata update failed"), 4000);
+}
+
+void MainWindow::onFontMetadataUpdated(const FontSummary& summary) {
+    setBusy(false);
+    m_modified = true;
+    m_model->setFontSummary(summary);
+    m_inspector->setFontSummary(summary);
+    onGlyphSelectionChanged();
+    updateWindowTitleAndCounts();
+    statusBar()->showMessage(tr("Updated font metadata (%1)").arg(summary.fontName), 4000);
+}
+
+void MainWindow::onFontMetadataUpdateFailed(const QString& error) {
+    setBusy(false);
+    QMessageBox::warning(this, tr("Update Font Metadata Failed"), error);
+    statusBar()->showMessage(tr("Font metadata update failed"), 4000);
+}
+
+void MainWindow::onFontValidated(const FontValidationReport& report) {
+    setBusy(false);
+    m_validationDock->show();
+    m_validationDock->raise();
+    m_validationPanel->setReport(report);
+
+    if (report.issueGlyphCount == 0) {
+        statusBar()->showMessage(
+            tr("Validation passed: 0 issues (%1 glyphs checked)").arg(report.totalGlyphs), 6000);
+    } else {
+        statusBar()->showMessage(
+            tr("Validation finished: %1 glyph(s) with issues").arg(report.issueGlyphCount), 6000);
+    }
+}
+
+void MainWindow::onFontValidationFailed(const QString& error) {
+    setBusy(false);
+    QMessageBox::warning(this, tr("Validation Failed"), error);
+    statusBar()->showMessage(tr("Validation failed"), 4000);
+}
+
 void MainWindow::onFontClosed() {
     m_hasOpenFont = false;
+    m_modified = false;
     m_currentFontPath.clear();
     m_model->clear();
+    m_gridView->setEmptyDropEnabled(true);
     m_inspector->clear();
+    m_validationPanel->setFontAvailable(false);
     m_exportAction->setEnabled(false);
     m_closeAction->setEnabled(false);
+    m_fontMetaAction->setEnabled(false);
+    m_validateAction->setEnabled(false);
     m_saveAreasBtn->setEnabled(false);
     updateWindowTitleAndCounts();
     statusBar()->showMessage(tr("Font closed"), 3000);
@@ -452,10 +613,26 @@ void MainWindow::onGlyphSelectionChanged() {
     m_inspector->setGlyph(g);
 }
 
+void MainWindow::onValidationGlyphSelected(int gid) {
+    const int row = m_model->rowForGid(gid);
+    if (row >= 0) {
+        const QModelIndex idx = m_model->index(row, 0);
+        m_gridView->setCurrentIndex(idx);
+        m_gridView->scrollTo(idx, QAbstractItemView::PositionAtCenter);
+        return;
+    }
+
+    statusBar()->showMessage(
+        tr("Glyph #%1 is hidden by the active Custom Glyph Area or search filter").arg(gid),
+        5000);
+}
+
 void MainWindow::setBusy(bool busy, const QString& message) {
     m_openAction->setEnabled(!busy);
     m_exportAction->setEnabled(!busy && m_hasOpenFont);
     m_closeAction->setEnabled(!busy && m_hasOpenFont);
+    m_fontMetaAction->setEnabled(!busy && m_hasOpenFont);
+    m_validateAction->setEnabled(!busy && m_hasOpenFont);
     if (busy) {
         m_progressBar->setVisible(true);
         m_progressBar->setRange(0, 0);
@@ -505,7 +682,7 @@ void MainWindow::applyCurrentAreaFilter() {
 
 void MainWindow::updateWindowTitleAndCounts() {
     if (!m_hasOpenFont) {
-        setWindowTitle(QStringLiteral("FontForgeGUI v0.1"));
+        setWindowTitle(QStringLiteral("FontForgeGUI v0.2"));
         m_countLabel->setText(tr("0 glyphs"));
         return;
     }
@@ -514,7 +691,8 @@ void MainWindow::updateWindowTitleAndCounts() {
     const QString label = !s.fullName.isEmpty() ? s.fullName
                           : (!s.fontName.isEmpty() ? s.fontName
                                                    : QFileInfo(m_currentFontPath).fileName());
-    setWindowTitle(QStringLiteral("%1 — FontForgeGUI v0.1").arg(label));
+    const QString dirtyPrefix = m_modified ? QStringLiteral("* ") : QString();
+    setWindowTitle(QStringLiteral("%1%2 — FontForgeGUI v0.2").arg(dirtyPrefix, label));
     m_countLabel->setText(
         tr("Showing %1 / %2 glyphs").arg(m_model->filteredGlyphCount()).arg(m_model->totalGlyphCount()));
 }
@@ -538,4 +716,3 @@ void MainWindow::persistAreaConfigIfOpen(bool showStatus) {
 }
 
 } // namespace ffgui
-

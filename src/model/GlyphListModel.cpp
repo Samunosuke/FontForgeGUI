@@ -57,6 +57,40 @@ void GlyphListModel::setDocument(const FontDocumentSnapshot& snapshot) {
     endResetModel();
 }
 
+void GlyphListModel::setFontSummary(const FontSummary& summary) {
+    m_summary = summary;
+    if (!m_filteredIndices.isEmpty()) {
+        emit dataChanged(index(0, 0), index(m_filteredIndices.size() - 1, 0),
+                         {AscentRole, DescentRole, EmSizeRole});
+    }
+}
+
+bool GlyphListModel::updateGlyph(const GlyphSummary& updated) {
+    int glyphIdx = -1;
+    for (int i = 0; i < m_glyphs.size(); ++i) {
+        if (m_glyphs[i].gid == updated.gid) {
+            glyphIdx = i;
+            break;
+        }
+    }
+    if (glyphIdx < 0) {
+        return false;
+    }
+
+    m_glyphs[glyphIdx] = updated;
+    const bool shouldBeVisible =
+        m_rangeFilter.matches(m_glyphs[glyphIdx]) && matchesSearch(m_glyphs[glyphIdx]);
+    const int existingRow = rowForGid(updated.gid);
+
+    if (shouldBeVisible && existingRow >= 0) {
+        const QModelIndex idx = index(existingRow, 0);
+        emit dataChanged(idx, idx);
+    } else if (shouldBeVisible != (existingRow >= 0)) {
+        rebuildFilter();
+    }
+    return true;
+}
+
 void GlyphListModel::clear() {
     beginResetModel();
     m_summary = FontSummary{};

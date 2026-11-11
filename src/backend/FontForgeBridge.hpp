@@ -30,9 +30,17 @@ public:
 
     bool openFont(const QString& path, FontDocumentSnapshot* outSnapshot, QString* outError);
     bool exportFont(const ExportOptions& options, QString* outError);
+    bool updateGlyphMetadata(const GlyphMetadataUpdate& update, GlyphSummary* outGlyph,
+                             QString* outError);
+    bool updateFontMetadata(const FontMetadataUpdate& update, FontSummary* outSummary,
+                            QString* outError);
+    bool validateFont(bool force, FontValidationReport* outReport, QString* outError);
     void closeFont();
 
     bool hasOpenFont() const;
+
+    static QStringList availableSfntStringIds();
+    static QVector<QPair<int, QString>> commonSfntLanguages();
 
 private:
     struct Impl;
@@ -40,4 +48,3 @@ private:
 };
 
 } // namespace ffgui
-

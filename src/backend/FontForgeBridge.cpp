@@ -5,6 +5,7 @@
 #include <QTransform>
 
 #include <algorithm>
+#include <array>
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
@@ -15,13 +16,18 @@
 extern "C" {
 #include <fontforge-config.h>
 #include "baseviews.h"
+#include "fontforge.h"
+#include "fvfonts.h"
+#include "lookups.h"
 #include "savefont.h"
 #include "sfd.h"
 #include "splinechar.h"
 #include "splinefont.h"
 #include "splineutil.h"
 #include "start.h"
+#include "tottf.h"
 #include "uiinterface.h"
+#include "ustring.h"
 }
 
 namespace ffgui {
@@ -170,6 +176,34 @@ QString qstr(const char* s) {
     return s ? QString::fromUtf8(s) : QString();
 }
 
+void replaceCString(char** dst, const QString& value, bool allowNull) {
+    free(*dst);
+    if (allowNull && value.isEmpty()) {
+        *dst = nullptr;
+    } else {
+        const QByteArray bytes = value.toUtf8();
+        *dst = copy(bytes.constData());
+    }
+}
+
+QString sfntStringIdName(int id) {
+    if (id >= 0 && id < ttf_namemax) {
+        const char* label = TTFNameIds(id);
+        if (label) {
+            return QString::fromUtf8(label);
+        }
+    }
+    return QStringLiteral("ID %1").arg(id);
+}
+
+QString sfntLanguageName(int lang) {
+    const char* label = MSLangString(lang);
+    if (label && label[0] != '\0') {
+        return QString::fromUtf8(label);
+    }
+    return QStringLiteral("0x%1").arg(lang, 4, 16, QLatin1Char('0')).toUpper();
+}
+
 void appendSplineSet(const SplineSet* head, const QTransform& transform, QPainterPath& outPath,
                      int& contourCount, int& pointCount) {
     constexpr int kMaxSplinesPerContour = 200000;
@@ -245,9 +279,48 @@ void appendLayerOutlines(const SplineChar* sc, int layerIdx, const QTransform& t
     }
 }
 
-FontDocumentSnapshot buildSnapshot(SplineFont* sf, FontViewBase* fv, const QString& path) {
-    FontDocumentSnapshot snap;
-    FontSummary& fs = snap.summary;
+QVector<SfntNameEntry> extractSfntNames(SplineFont* sf) {
+    QVector<SfntNameEntry> entries;
+    struct ttflangname dummy {};
+    DefaultTTFEnglishNames(&dummy, sf);
+
+    struct ttflangname* english = nullptr;
+    for (struct ttflangname* cur = sf->names; cur != nullptr; cur = cur->next) {
+        if (cur->lang == 0x409) {
+            english = cur;
+            break;
+        }
+    }
+
+    for (int i = 0; i < ttf_namemax; ++i) {
+        const char* nm = (english != nullptr && english->names[i] != nullptr) ? english->names[i]
+                                                                              : dummy.names[i];
+        if (nm != nullptr && nm[0] != '\0') {
+            entries.append(
+                {0x409, sfntLanguageName(0x409), i, sfntStringIdName(i), QString::fromUtf8(nm)});
+        }
+    }
+
+    for (struct ttflangname* cur = sf->names; cur != nullptr; cur = cur->next) {
+        if (cur == english) {
+            continue;
+        }
+        for (int i = 0; i < ttf_namemax; ++i) {
+            if (cur->names[i] != nullptr && cur->names[i][0] != '\0') {
+                entries.append({cur->lang, sfntLanguageName(cur->lang), i, sfntStringIdName(i),
+                                QString::fromUtf8(cur->names[i])});
+            }
+        }
+    }
+
+    for (int i = 0; i < ttf_namemax; ++i) {
+        free(dummy.names[i]);
+    }
+    return entries;
+}
+
+FontSummary extractFontSummary(SplineFont* sf, FontViewBase* fv, const QString& path) {
+    FontSummary fs;
     fs.filePath = path;
     fs.fontName = qstr(sf->fontname);
     fs.familyName = qstr(sf->familyname);
@@ -258,6 +331,9 @@ FontDocumentSnapshot buildSnapshot(SplineFont* sf, FontViewBase* fv, const QStri
     fs.ascent = sf->ascent;
     fs.descent = sf->descent;
     fs.emSize = std::max(1, sf->ascent + sf->descent);
+    fs.italicAngle = static_cast<double>(sf->italicangle);
+    fs.underlinePos = static_cast<double>(sf->upos);
+    fs.underlineWidth = static_cast<double>(sf->uwidth);
 
     const int activeLayer = (fv != nullptr && fv->active_layer >= 0) ? fv->active_layer : ly_fore;
     if (sf->grid.order2 || (sf->glyphcnt > 0 && sf->glyphs[0] != nullptr &&
@@ -266,34 +342,93 @@ FontDocumentSnapshot buildSnapshot(SplineFont* sf, FontViewBase* fv, const QStri
         fs.isOrder2 = true;
     }
 
+    int count = 0;
+    for (int gid = 0; gid < sf->glyphcnt; ++gid) {
+        if (sf->glyphs[gid] != nullptr) {
+            ++count;
+        }
+    }
+    fs.glyphCount = count;
+    fs.sfntNames = extractSfntNames(sf);
+    return fs;
+}
+
+GlyphSummary extractGlyphSummary(const SplineChar* sc, int gid, int activeLayer) {
+    GlyphSummary gs;
+    gs.gid = gid;
+    gs.unicode = sc->unicodeenc;
+    for (const struct altuni* au = sc->altuni; au != nullptr; au = au->next) {
+        gs.altUnicodes.append(au->unienc);
+    }
+    gs.name = qstr(sc->name);
+    gs.width = sc->width;
+    gs.vwidth = sc->vwidth;
+    gs.outline.setFillRule(Qt::WindingFill);
+
+    appendLayerOutlines(sc, activeLayer, QTransform(), gs.outline, gs.contourCount, gs.pointCount,
+                        gs.referenceCount, 0);
+    gs.hasOutline = !gs.outline.isEmpty();
+    if (gs.hasOutline) {
+        gs.bounds = gs.outline.boundingRect();
+    }
+    return gs;
+}
+
+FontDocumentSnapshot buildSnapshot(SplineFont* sf, FontViewBase* fv, const QString& path) {
+    FontDocumentSnapshot snap;
+    snap.summary = extractFontSummary(sf, fv, path);
+
+    const int activeLayer = (fv != nullptr && fv->active_layer >= 0) ? fv->active_layer : ly_fore;
     snap.glyphs.reserve(sf->glyphcnt);
     for (int gid = 0; gid < sf->glyphcnt; ++gid) {
         const SplineChar* sc = sf->glyphs[gid];
         if (sc == nullptr) {
             continue;
         }
-        GlyphSummary gs;
-        gs.gid = gid;
-        gs.unicode = sc->unicodeenc;
-        for (const struct altuni* au = sc->altuni; au != nullptr; au = au->next) {
-            gs.altUnicodes.append(au->unienc);
-        }
-        gs.name = qstr(sc->name);
-        gs.width = sc->width;
-        gs.vwidth = sc->vwidth;
-        gs.outline.setFillRule(Qt::WindingFill);
-
-        appendLayerOutlines(sc, activeLayer, QTransform(), gs.outline, gs.contourCount,
-                            gs.pointCount, gs.referenceCount, 0);
-        gs.hasOutline = !gs.outline.isEmpty();
-        if (gs.hasOutline) {
-            gs.bounds = gs.outline.boundingRect();
-        }
-        snap.glyphs.append(std::move(gs));
+        snap.glyphs.append(extractGlyphSummary(sc, gid, activeLayer));
     }
 
-    fs.glyphCount = snap.glyphs.size();
+    snap.summary.glyphCount = snap.glyphs.size();
     return snap;
+}
+
+QStringList describeValidationFlags(uint32_t flags) {
+    struct FlagDesc {
+        uint32_t mask;
+        const char* text;
+    };
+    static constexpr std::array<FlagDesc, 22> kTable = {{
+        {vs_opencontour, "Open contour"},
+        {vs_selfintersects, "Self-intersecting contours"},
+        {vs_wrongdirection, "Wrong contour direction"},
+        {vs_flippedreferences, "Flipped reference(s)"},
+        {vs_missingextrema, "Missing points at extrema"},
+        {vs_missingglyphnameingsub, "Missing glyph name in GSUB"},
+        {vs_toomanypoints, "Too many points (>1500)"},
+        {vs_toomanyhints, "Too many hints (>96)"},
+        {vs_badglyphname, "Invalid glyph name"},
+        {vs_maxp_toomanypoints, "Exceeds maxp point limit"},
+        {vs_maxp_toomanypaths, "Exceeds maxp contour limit"},
+        {vs_maxp_toomanycomppoints, "Exceeds maxp composite point limit"},
+        {vs_maxp_toomanycomppaths, "Exceeds maxp composite contour limit"},
+        {vs_maxp_instrtoolong, "TrueType instructions too long"},
+        {vs_maxp_toomanyrefs, "Too many component references"},
+        {vs_maxp_refstoodeep, "Component references nested too deep"},
+        {vs_pointstoofarapart, "Points too far apart (>32767)"},
+        {vs_nonintegral, "Non-integral coordinates"},
+        {vs_missinganchor, "Missing anchor point"},
+        {vs_dupname, "Duplicate glyph name"},
+        {vs_dupunicode, "Duplicate Unicode code point"},
+        {vs_overlappedhints, "Overlapping hints"},
+    }};
+
+    QStringList out;
+    for (const FlagDesc& entry : kTable) {
+        if ((flags & entry.mask) != 0) {
+            out.append(QString::fromLatin1(entry.text));
+        }
+    }
+    return out;
 }
 
 } // namespace
@@ -419,13 +554,7 @@ bool FontForgeBridge::exportFont(const ExportOptions& options, QString* outError
     if (options.roundToInt) {
         fmFlags |= fm_flag_round;
     }
-    if (options.opentypeTables) {
-        // In FontForge's GenerateScript/fmflag2ttfflag, setting ONLY fm_flag_apple
-        // turns on Apple mode; setting neither defaults to OpenType; setting
-        // fm_flag_opentype sets both applemode+otmode. Keep clean OpenType default (0),
-        // or explicitly set fm_flag_opentype when requested? Look at savefont.c:1054-1066:
-        // case 0x00 => ttf_flag_otmode! Wait: for PS/PFB fm_flag_afm controls AFM.
-    } else {
+    if (!options.opentypeTables) {
         fmFlags |= fm_flag_apple;
     }
     if (options.omitHints) {
@@ -455,6 +584,258 @@ bool FontForgeBridge::exportFont(const ExportOptions& options, QString* outError
     return true;
 }
 
+bool FontForgeBridge::updateGlyphMetadata(const GlyphMetadataUpdate& update, GlyphSummary* outGlyph,
+                                          QString* outError) {
+    if (!hasOpenFont()) {
+        if (outError) {
+            *outError = QStringLiteral("No font is currently loaded.");
+        }
+        return false;
+    }
+
+    SplineFont* sf = m_impl->sf;
+    if (update.gid < 0 || update.gid >= sf->glyphcnt || sf->glyphs[update.gid] == nullptr) {
+        if (outError) {
+            *outError = QStringLiteral("Invalid glyph ID: %1").arg(update.gid);
+        }
+        return false;
+    }
+
+    const QString trimmedName = update.name.trimmed();
+    if (trimmedName.isEmpty()) {
+        if (outError) {
+            *outError = QStringLiteral("Glyph name must not be empty.");
+        }
+        return false;
+    }
+    for (QChar ch : trimmedName) {
+        if (ch.isSpace()) {
+            if (outError) {
+                *outError = QStringLiteral("Glyph name must not contain whitespace.");
+            }
+            return false;
+        }
+    }
+    if (update.unicode < -1 || update.unicode > 0x10FFFF) {
+        if (outError) {
+            *outError = QStringLiteral("Unicode code point is out of range.");
+        }
+        return false;
+    }
+    for (int32_t alt : update.altUnicodes) {
+        if (alt < 0 || alt > 0x10FFFF) {
+            if (outError) {
+                *outError = QStringLiteral("Alternate Unicode code point is out of range.");
+            }
+            return false;
+        }
+    }
+
+    SplineChar* sc = sf->glyphs[update.gid];
+    const QByteArray newNameBytes = trimmedName.toUtf8();
+    if (sc->name == nullptr || std::strcmp(sc->name, newNameBytes.constData()) != 0) {
+        SFGlyphRenameFixup(sf, sc->name, newNameBytes.constData(), false);
+        free(sc->name);
+        sc->name = copy(newNameBytes.constData());
+        sc->namechanged = sc->changed = true;
+        GlyphHashFree(sf);
+        SCRefreshTitles(sc);
+        for (FontViewBase* fvs = sf->fv; fvs != nullptr; fvs = fvs->nextsame) {
+            if (fvs->map && fvs->map->enc && fvs->map->enc->psnames != nullptr &&
+                fvs->map->enc != &custom) {
+                fvs->map->enc = &custom;
+            }
+        }
+    }
+
+    if (sc->unicodeenc != update.unicode) {
+        sc->unicodeenc = update.unicode;
+        sc->changed = true;
+        SCRefreshTitles(sc);
+        for (FontViewBase* fvs = sf->fv; fvs != nullptr; fvs = fvs->nextsame) {
+            if (fvs->map && fvs->map->enc && fvs->map->enc->psnames == nullptr &&
+                fvs->map->enc != &custom) {
+                fvs->map->enc = &custom;
+            }
+        }
+    }
+
+    struct altuni* head = nullptr;
+    struct altuni* tail = nullptr;
+    for (int32_t alt : update.altUnicodes) {
+        auto* node = static_cast<struct altuni*>(chunkalloc(sizeof(struct altuni)));
+        node->unienc = alt;
+        node->vs = -1;
+        node->fid = 0;
+        if (head == nullptr) {
+            head = node;
+        } else {
+            tail->next = node;
+        }
+        tail = node;
+    }
+    AltUniFree(sc->altuni);
+    sc->altuni = head;
+    sc->changed = true;
+    sf->changed = true;
+
+    const int activeLayer =
+        (m_impl->fv && m_impl->fv->active_layer >= 0) ? m_impl->fv->active_layer : ly_fore;
+    if (activeLayer >= 0 && activeLayer < sc->layer_cnt) {
+        sc->layers[activeLayer].validation_state = vs_unknown;
+    }
+
+    if (outGlyph != nullptr) {
+        *outGlyph = extractGlyphSummary(sc, update.gid, activeLayer);
+    }
+    return true;
+}
+
+bool FontForgeBridge::updateFontMetadata(const FontMetadataUpdate& update, FontSummary* outSummary,
+                                         QString* outError) {
+    if (!hasOpenFont()) {
+        if (outError) {
+            *outError = QStringLiteral("No font is currently loaded.");
+        }
+        return false;
+    }
+
+    const QString trimmedFontName = update.fontName.trimmed();
+    if (trimmedFontName.isEmpty()) {
+        if (outError) {
+            *outError = QStringLiteral("PostScript Font Name must not be empty.");
+        }
+        return false;
+    }
+    if (update.ascent < 0 || update.descent < 0 || (update.ascent + update.descent) <= 0) {
+        if (outError) {
+            *outError = QStringLiteral("Ascent + Descent (EM size) must be positive.");
+        }
+        return false;
+    }
+
+    SplineFont* sf = m_impl->sf;
+    replaceCString(&sf->fontname, trimmedFontName, false);
+    replaceCString(&sf->familyname, update.familyName.trimmed(), false);
+    replaceCString(&sf->fullname, update.fullName.trimmed(), false);
+    replaceCString(&sf->weight, update.weight.trimmed(), false);
+    replaceCString(&sf->version, update.version.trimmed(), true);
+    replaceCString(&sf->copyright, update.copyright, true);
+
+    sf->ascent = update.ascent;
+    sf->descent = update.descent;
+    sf->italicangle = update.italicAngle;
+    sf->upos = update.underlinePos;
+    sf->uwidth = update.underlineWidth;
+
+    if (update.updateSfntNames) {
+        for (struct ttflangname* cur = sf->names; cur != nullptr; cur = cur->next) {
+            for (int i = 0; i < ttf_namemax; ++i) {
+                free(cur->names[i]);
+                cur->names[i] = nullptr;
+            }
+        }
+
+        struct ttflangname dummy {};
+        DefaultTTFEnglishNames(&dummy, sf);
+
+        for (const SfntNameEntry& entry : update.sfntNames) {
+            if (entry.stringId < 0 || entry.stringId >= ttf_namemax || entry.value.isEmpty()) {
+                continue;
+            }
+            const QByteArray valBytes = entry.value.toUtf8();
+            if (entry.langId == 0x409 && dummy.names[entry.stringId] != nullptr &&
+                std::strcmp(valBytes.constData(), dummy.names[entry.stringId]) == 0) {
+                continue;
+            }
+            struct ttflangname* target = nullptr;
+            for (struct ttflangname* cur = sf->names; cur != nullptr; cur = cur->next) {
+                if (cur->lang == entry.langId) {
+                    target = cur;
+                    break;
+                }
+            }
+            if (target == nullptr) {
+                target = static_cast<struct ttflangname*>(chunkalloc(sizeof(struct ttflangname)));
+                target->lang = entry.langId;
+                target->next = sf->names;
+                sf->names = target;
+            }
+            free(target->names[entry.stringId]);
+            target->names[entry.stringId] = copy(valBytes.constData());
+        }
+
+        for (int i = 0; i < ttf_namemax; ++i) {
+            free(dummy.names[i]);
+        }
+    }
+
+    sf->changed = true;
+
+    if (outSummary != nullptr) {
+        *outSummary = extractFontSummary(sf, m_impl->fv, m_impl->currentPath);
+    }
+    return true;
+}
+
+bool FontForgeBridge::validateFont(bool force, FontValidationReport* outReport, QString* outError) {
+    if (!hasOpenFont()) {
+        if (outError) {
+            *outError = QStringLiteral("No font is currently loaded.");
+        }
+        return false;
+    }
+
+    SplineFont* sf = m_impl->sf;
+    const int activeLayer =
+        (m_impl->fv && m_impl->fv->active_layer >= 0) ? m_impl->fv->active_layer : ly_fore;
+
+    const int result = SFValidate(sf, activeLayer, force ? 1 : 0);
+    if (result == -1) {
+        if (outError) {
+            *outError = QStringLiteral("Validation was cancelled.");
+        }
+        return false;
+    }
+
+    FontValidationReport report;
+    report.combinedFlags = static_cast<uint32_t>(result);
+
+    for (int gid = 0; gid < sf->glyphcnt; ++gid) {
+        const SplineChar* sc = sf->glyphs[gid];
+        if (sc == nullptr) {
+            continue;
+        }
+        ++report.totalGlyphs;
+        if (activeLayer < 0 || activeLayer >= sc->layer_cnt) {
+            continue;
+        }
+        uint32_t state = sc->layers[activeLayer].validation_state & ~static_cast<uint32_t>(vs_known);
+        if (sc->unlink_rm_ovrlp_save_undo) {
+            state &= ~static_cast<uint32_t>(vs_selfintersects);
+        }
+        if (state != 0) {
+            GlyphValidationIssue issue;
+            issue.gid = gid;
+            issue.unicode = sc->unicodeenc;
+            issue.glyphName = qstr(sc->name);
+            issue.flags = state;
+            issue.descriptions = describeValidationFlags(state);
+            if (issue.descriptions.isEmpty()) {
+                issue.descriptions.append(
+                    QStringLiteral("Validation flags: 0x%1").arg(state, 0, 16));
+            }
+            report.issues.append(std::move(issue));
+        }
+    }
+
+    report.issueGlyphCount = report.issues.size();
+    if (outReport != nullptr) {
+        *outReport = std::move(report);
+    }
+    return true;
+}
+
 void FontForgeBridge::closeFont() {
     if (m_impl->fv != nullptr) {
         FontViewClose(m_impl->fv);
@@ -469,6 +850,38 @@ void FontForgeBridge::closeFont() {
 
 bool FontForgeBridge::hasOpenFont() const {
     return m_impl->sf != nullptr && m_impl->fv != nullptr;
+}
+
+QStringList FontForgeBridge::availableSfntStringIds() {
+    QStringList ids;
+    ids.reserve(ttf_namemax);
+    for (int i = 0; i < ttf_namemax; ++i) {
+        ids.append(sfntStringIdName(i));
+    }
+    return ids;
+}
+
+QVector<QPair<int, QString>> FontForgeBridge::commonSfntLanguages() {
+    static constexpr std::array<int, 12> kLangIds = {
+        0x0409, // English (US)
+        0x0809, // English (UK)
+        0x0407, // German (Standard)
+        0x0C07, // German (Austria)
+        0x0807, // German (Switzerland)
+        0x040C, // French (Standard)
+        0x040A, // Spanish
+        0x0410, // Italian
+        0x0413, // Dutch
+        0x0411, // Japanese
+        0x0804, // Chinese (PRC)
+        0x0419, // Russian
+    };
+    QVector<QPair<int, QString>> out;
+    out.reserve(static_cast<qsizetype>(kLangIds.size()));
+    for (int id : kLangIds) {
+        out.append({id, sfntLanguageName(id)});
+    }
+    return out;
 }
 
 } // namespace ffgui

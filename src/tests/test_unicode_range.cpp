@@ -3,21 +3,30 @@
 #include "model/UnicodeRangeFilter.hpp"
 
 #include <QTemporaryDir>
-#include <cassert>
+#include <cstdlib>
 #include <iostream>
+
+#define CHECK(expr)                                                                                \
+    do {                                                                                           \
+        if (!(expr)) {                                                                             \
+            std::cerr << "CHECK failed at " << __FILE__ << ":" << __LINE__ << ": " << #expr        \
+                      << "\n";                                                                     \
+            std::abort();                                                                          \
+        }                                                                                          \
+    } while (false)
 
 int main() {
     // 1. Parse ranges
     QString err;
     const auto allFilter = ffgui::UnicodeRangeFilter::parse(QStringLiteral("*"), true, &err);
-    assert(allFilter.isValid());
-    assert(allFilter.isMatchAll());
+    CHECK(allFilter.isValid());
+    CHECK(allFilter.isMatchAll());
 
     const auto rangeFilter =
         ffgui::UnicodeRangeFilter::parse(QStringLiteral("U+0041-005A, E000..E00F, 20AC"), false, &err);
-    assert(rangeFilter.isValid());
-    assert(!rangeFilter.isMatchAll());
-    assert(rangeFilter.ranges().size() == 3);
+    CHECK(rangeFilter.isValid());
+    CHECK(!rangeFilter.isMatchAll());
+    CHECK(rangeFilter.ranges().size() == 3);
 
     ffgui::GlyphSummary glyphA;
     glyphA.gid = 1;
@@ -45,37 +54,37 @@ int main() {
     glyphAlt.altUnicodes = {0x0041};
     glyphAlt.name = QStringLiteral("Alpha");
 
-    assert(rangeFilter.matches(glyphA));
-    assert(!rangeFilter.matches(glyphLowerA));
-    assert(rangeFilter.matches(glyphIcon));
-    assert(!rangeFilter.matches(glyphUnencoded));
-    assert(rangeFilter.matches(glyphAlt));
+    CHECK(rangeFilter.matches(glyphA));
+    CHECK(!rangeFilter.matches(glyphLowerA));
+    CHECK(rangeFilter.matches(glyphIcon));
+    CHECK(!rangeFilter.matches(glyphUnencoded));
+    CHECK(rangeFilter.matches(glyphAlt));
 
     // Invalid syntax checks
     const auto badOrder = ffgui::UnicodeRangeFilter::parse(QStringLiteral("007E-0020"), false, &err);
-    assert(!badOrder.isValid());
-    assert(!err.isEmpty());
+    CHECK(!badOrder.isValid());
+    CHECK(!err.isEmpty());
 
     const auto badHex = ffgui::UnicodeRangeFilter::parse(QStringLiteral("ZZZZ"), false, &err);
-    assert(!badHex.isValid());
+    CHECK(!badHex.isValid());
 
     // 2. Sidecar config persistence
     QTemporaryDir tmpDir;
-    assert(tmpDir.isValid());
+    CHECK(tmpDir.isValid());
     const QString fakeFont = tmpDir.filePath(QStringLiteral("DemoFont.otf"));
 
     ffgui::CustomGlyphAreaConfig cfg = ffgui::CustomGlyphAreaConfig::createDefault();
     cfg.areas.append({QStringLiteral("Symbols"), QStringLiteral("U+2000-206F"), true});
     cfg.activeIndex = 3;
-    assert(cfg.saveForFont(fakeFont, &err));
+    CHECK(cfg.saveForFont(fakeFont, &err));
 
     ffgui::CustomGlyphAreaConfig loaded;
-    assert(ffgui::CustomGlyphAreaConfig::loadForFont(fakeFont, &loaded, &err));
-    assert(loaded.activeIndex == 3);
-    assert(loaded.areas.size() == cfg.areas.size());
-    assert(loaded.areas[3].name == QStringLiteral("Symbols"));
-    assert(loaded.areas[3].rangeSpec == QStringLiteral("U+2000-206F"));
-    assert(loaded.areas[3].includeUnencoded == true);
+    CHECK(ffgui::CustomGlyphAreaConfig::loadForFont(fakeFont, &loaded, &err));
+    CHECK(loaded.activeIndex == 3);
+    CHECK(loaded.areas.size() == cfg.areas.size());
+    CHECK(loaded.areas[3].name == QStringLiteral("Symbols"));
+    CHECK(loaded.areas[3].rangeSpec == QStringLiteral("U+2000-206F"));
+    CHECK(loaded.areas[3].includeUnencoded == true);
 
     // 3. GlyphListModel filtering + search
     ffgui::FontDocumentSnapshot snap;
@@ -84,17 +93,16 @@ int main() {
     ffgui::GlyphListModel model;
     model.setRangeFilter(rangeFilter);
     model.setDocument(snap);
-    assert(model.rowCount() == 2); // A and icon_home
+    CHECK(model.rowCount() == 2); // A and icon_home
 
     model.setSearchText(QStringLiteral("#3"));
-    assert(model.rowCount() == 1);
-    assert(model.glyphAtRow(0)->gid == 3);
+    CHECK(model.rowCount() == 1);
+    CHECK(model.glyphAtRow(0)->gid == 3);
 
     model.setSearchText(QStringLiteral("U+0041"));
-    assert(model.rowCount() == 1);
-    assert(model.glyphAtRow(0)->gid == 1);
+    CHECK(model.rowCount() == 1);
+    CHECK(model.glyphAtRow(0)->gid == 1);
 
     std::cout << "test_unicode_range passed\n";
     return 0;
 }
-

@@ -4,10 +4,19 @@
 #include <QPainterPath>
 #include <QRectF>
 #include <QString>
+#include <QStringList>
 #include <QVector>
 #include <cstdint>
 
 namespace ffgui {
+
+struct SfntNameEntry {
+    int langId = 0x0409;
+    QString langName;
+    int stringId = 0;
+    QString stringIdName;
+    QString value;
+};
 
 struct FontSummary {
     QString filePath;
@@ -20,8 +29,12 @@ struct FontSummary {
     int ascent = 800;
     int descent = 200;
     int emSize = 1000;
+    double italicAngle = 0.0;
+    double underlinePos = -100.0;
+    double underlineWidth = 50.0;
     int glyphCount = 0;
     bool isOrder2 = false;
+    QVector<SfntNameEntry> sfntNames;
 };
 
 struct GlyphSummary {
@@ -53,5 +66,42 @@ struct ExportOptions {
     bool generateAfm = false;
 };
 
-} // namespace ffgui
+struct GlyphMetadataUpdate {
+    int gid = -1;
+    QString name;
+    int32_t unicode = -1;
+    QList<int32_t> altUnicodes;
+};
 
+struct FontMetadataUpdate {
+    QString fontName;
+    QString familyName;
+    QString fullName;
+    QString weight;
+    QString version;
+    QString copyright;
+    int ascent = 800;
+    int descent = 200;
+    double italicAngle = 0.0;
+    double underlinePos = -100.0;
+    double underlineWidth = 50.0;
+    bool updateSfntNames = false;
+    QVector<SfntNameEntry> sfntNames;
+};
+
+struct GlyphValidationIssue {
+    int gid = -1;
+    int32_t unicode = -1;
+    QString glyphName;
+    uint32_t flags = 0;
+    QStringList descriptions;
+};
+
+struct FontValidationReport {
+    uint32_t combinedFlags = 0;
+    int totalGlyphs = 0;
+    int issueGlyphCount = 0;
+    QVector<GlyphValidationIssue> issues;
+};
+
+} // namespace ffgui

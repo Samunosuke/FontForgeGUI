@@ -43,10 +43,39 @@ void FontWorker::exportFont(const ExportOptions& options) {
     }
 }
 
+void FontWorker::updateGlyphMetadata(const GlyphMetadataUpdate& update) {
+    GlyphSummary updated;
+    QString error;
+    if (m_bridge->updateGlyphMetadata(update, &updated, &error)) {
+        emit glyphMetadataUpdated(updated);
+    } else {
+        emit glyphMetadataUpdateFailed(error);
+    }
+}
+
+void FontWorker::updateFontMetadata(const FontMetadataUpdate& update) {
+    FontSummary updated;
+    QString error;
+    if (m_bridge->updateFontMetadata(update, &updated, &error)) {
+        emit fontMetadataUpdated(updated);
+    } else {
+        emit fontMetadataUpdateFailed(error);
+    }
+}
+
+void FontWorker::validateFont(bool force) {
+    FontValidationReport report;
+    QString error;
+    if (m_bridge->validateFont(force, &report, &error)) {
+        emit fontValidated(report);
+    } else {
+        emit fontValidationFailed(error);
+    }
+}
+
 void FontWorker::closeFont() {
     m_bridge->closeFont();
     emit fontClosed();
 }
 
 } // namespace ffgui
-

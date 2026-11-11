@@ -5,6 +5,8 @@
 #include <QWidget>
 
 class QLabel;
+class QLineEdit;
+class QPushButton;
 
 namespace ffgui {
 
@@ -17,7 +19,7 @@ public:
     void setGlyph(const FontSummary& font, const GlyphSummary& glyph);
     void clear();
 
-    QSize minimumSizeHint() const override { return QSize(220, 220); }
+    QSize minimumSizeHint() const override { return QSize(220, 200); }
 
 protected:
     void paintEvent(QPaintEvent* event) override;
@@ -38,18 +40,40 @@ public:
     void setGlyph(const GlyphSummary* glyph);
     void clear();
 
+signals:
+    void glyphMetadataEditRequested(const ffgui::GlyphMetadataUpdate& update);
+    void editFontMetadataRequested();
+
+private slots:
+    void onFieldsEdited();
+    void onApplyClicked();
+    void onRevertClicked();
+
 private:
+    void populateEditorFromGlyph();
+    bool parseEditorFields(GlyphMetadataUpdate* outUpdate, QString* outError) const;
+    void updateActionButtons();
+
     GlyphPreviewCanvas* m_canvas = nullptr;
-    QLabel* m_glyphNameLabel = nullptr;
-    QLabel* m_unicodeLabel = nullptr;
+    QLineEdit* m_nameEdit = nullptr;
+    QLineEdit* m_unicodeEdit = nullptr;
+    QLabel* m_unicodeCharLabel = nullptr;
+    QLineEdit* m_altUnicodesEdit = nullptr;
+    QLabel* m_editErrorLabel = nullptr;
+    QPushButton* m_applyBtn = nullptr;
+    QPushButton* m_revertBtn = nullptr;
+
     QLabel* m_gidLabel = nullptr;
     QLabel* m_widthLabel = nullptr;
     QLabel* m_geometryLabel = nullptr;
     QLabel* m_boundsLabel = nullptr;
     QLabel* m_fontInfoLabel = nullptr;
+    QPushButton* m_editFontMetaBtn = nullptr;
 
     FontSummary m_fontSummary;
+    bool m_hasGlyph = false;
+    GlyphSummary m_currentGlyph;
+    bool m_updatingUi = false;
 };
 
 } // namespace ffgui
-

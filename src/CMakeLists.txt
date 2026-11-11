@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(FontForgeGUI VERSION 0.1.0 LANGUAGES C CXX)
+project(FontForgeGUI VERSION 0.2.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -72,10 +72,16 @@ add_executable(FontForgeGUI
     ui/MainWindow.cpp
     ui/GlyphGridDelegate.hpp
     ui/GlyphGridDelegate.cpp
+    ui/GlyphGridView.hpp
+    ui/GlyphGridView.cpp
     ui/GlyphInspectorPanel.hpp
     ui/GlyphInspectorPanel.cpp
     ui/ExportFontDialog.hpp
     ui/ExportFontDialog.cpp
+    ui/FontMetadataDialog.hpp
+    ui/FontMetadataDialog.cpp
+    ui/ValidationPanel.hpp
+    ui/ValidationPanel.cpp
 )
 
 target_link_libraries(FontForgeGUI
@@ -98,4 +104,11 @@ if(BUILD_TESTING)
     add_executable(test_unicode_range tests/test_unicode_range.cpp)
     target_link_libraries(test_unicode_range PRIVATE ffgui_core)
     add_test(NAME unicode_range COMMAND test_unicode_range)
+
+    add_executable(test_v02_metadata_validation tests/test_v02_metadata_validation.cpp)
+    target_link_libraries(test_v02_metadata_validation PRIVATE ffgui_core)
+    target_compile_definitions(test_v02_metadata_validation PRIVATE
+        TEST_FONTS_DIR="${FONTFORGE_SOURCE_DIR}/tests/fonts"
+    )
+    add_test(NAME v02_metadata_validation COMMAND test_v02_metadata_validation)
 endif()

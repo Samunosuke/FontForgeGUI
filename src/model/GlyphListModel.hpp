@@ -31,6 +31,8 @@ public:
     QVariant data(const QModelIndex& index, int role = Qt::DisplayRole) const override;
 
     void setDocument(const FontDocumentSnapshot& snapshot);
+    void setFontSummary(const FontSummary& summary);
+    bool updateGlyph(const GlyphSummary& updated);
     void clear();
 
     void setRangeFilter(const UnicodeRangeFilter& filter);

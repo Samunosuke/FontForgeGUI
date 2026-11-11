@@ -9,6 +9,7 @@
 class QAction;
 class QCheckBox;
 class QComboBox;
+class QDockWidget;
 class QLabel;
 class QLineEdit;
 class QListView;
@@ -21,8 +22,10 @@ namespace ffgui {
 
 class FontWorker;
 class GlyphGridDelegate;
+class GlyphGridView;
 class GlyphInspectorPanel;
 class GlyphListModel;
+class ValidationPanel;
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -37,11 +40,19 @@ private slots:
     void onOpenFontClicked();
     void onExportFontClicked();
     void onCloseFontClicked();
+    void onEditFontMetadataClicked();
+    void onValidateFontClicked();
 
     void onFontLoaded(const ffgui::FontDocumentSnapshot& snapshot);
     void onFontLoadFailed(const QString& error);
     void onFontExported(const QString& outputPath);
     void onFontExportFailed(const QString& error);
+    void onGlyphMetadataUpdated(const ffgui::GlyphSummary& glyph);
+    void onGlyphMetadataUpdateFailed(const QString& error);
+    void onFontMetadataUpdated(const ffgui::FontSummary& summary);
+    void onFontMetadataUpdateFailed(const QString& error);
+    void onFontValidated(const ffgui::FontValidationReport& report);
+    void onFontValidationFailed(const QString& error);
     void onFontClosed();
     void onLogMessage(const QString& level, const QString& message);
     void onProgressUpdated(int current, int total, const QString& status);
@@ -55,6 +66,7 @@ private slots:
     void onSearchTextChanged(const QString& text);
     void onZoomChanged(int value);
     void onGlyphSelectionChanged();
+    void onValidationGlyphSelected(int gid);
 
 private:
     void setupUi();
@@ -70,12 +82,16 @@ private:
 
     GlyphListModel* m_model = nullptr;
     GlyphGridDelegate* m_delegate = nullptr;
-    QListView* m_gridView = nullptr;
+    GlyphGridView* m_gridView = nullptr;
     GlyphInspectorPanel* m_inspector = nullptr;
+    ValidationPanel* m_validationPanel = nullptr;
+    QDockWidget* m_validationDock = nullptr;
 
     QAction* m_openAction = nullptr;
     QAction* m_exportAction = nullptr;
     QAction* m_closeAction = nullptr;
+    QAction* m_fontMetaAction = nullptr;
+    QAction* m_validateAction = nullptr;
 
     QComboBox* m_areaCombo = nullptr;
     QLineEdit* m_rangeEdit = nullptr;
@@ -96,7 +112,7 @@ private:
     CustomGlyphAreaConfig m_areaConfig;
     bool m_updatingAreaUi = false;
     bool m_hasOpenFont = false;
+    bool m_modified = false;
 };
 
 } // namespace ffgui
-
