@@ -1,0 +1,53 @@
+# Build & CMake artifacts
+/build/
+/build-*/
+/cmake-build-*/
+/out/
+CMakeCache.txt
+CMakeFiles/
+CMakeUserPresets.json
+Testing/
+compile_commands.json
+*.ninja
+.ninja_deps
+.ninja_log
+
+# Compiled objects & binaries
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.so.*
+*.dll
+*.dylib
+*.exe
+*.pdb
+
+# Qt / IDE / Editor files
+CMakeLists.txt.user*
+*.pro.user*
+.qtcreator/
+.cache/
+.vscode/
+.vs/
+.idea/
+*.swp
+*.swo
+*~
+tags
+
+# OS metadata
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Python / Packaging
+__pycache__/
+*.py[co]
+dist/
+
