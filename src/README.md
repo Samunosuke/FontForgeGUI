@@ -37,3 +37,16 @@ You can also pass a font file on the command line (or drop one onto the empty gl
 ```bash
 ./build/FontForgeGUI ../FontForge/tests/fonts/Ambrosia.sfd
 ```
+
+## Build & Run (Windows / MSYS2 UCRT64)
+
+1. Install [MSYS2](https://www.msys2.org/) (default path `C:\msys64`).
+2. Run [`scripts/build_windows.ps1`](../scripts/build_windows.ps1) in PowerShell:
+
+```powershell
+# First time: install MSYS2 UCRT64 packages, configure, build, and run CTest
+.\scripts\build_windows.ps1 -InstallDeps
+
+# Create standalone dist-win\ bundle (FontForgeGUI.exe + Qt6/MinGW/FontForge DLLs)
+.\scripts\build_windows.ps1 -Package
+```
