@@ -71,7 +71,7 @@ target_link_libraries(ffgui_core
 
 target_compile_features(ffgui_core PUBLIC cxx_std_20)
 
-add_executable(FontForgeGUI
+add_executable(FontForgeGUI WIN32
     main.cpp
     ui/MainWindow.hpp
     ui/MainWindow.cpp
@@ -101,6 +101,15 @@ target_link_libraries(FontForgeGUI
 )
 
 target_compile_features(FontForgeGUI PRIVATE cxx_std_20)
+
+if(WIN32)
+    add_custom_command(TARGET FontForgeGUI POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "$<TARGET_FILE:fontforge>"
+            "$<TARGET_FILE_DIR:FontForgeGUI>"
+        COMMENT "Copying libfontforge DLL to build directory"
+    )
+endif()
 
 include(CTest)
 if(BUILD_TESTING)

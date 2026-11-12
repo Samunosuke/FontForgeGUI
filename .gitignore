@@ -51,4 +51,5 @@ __pycache__/
 *.py[co]
 dist/
 dist-*/
+*.zip
 
