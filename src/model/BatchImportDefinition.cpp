@@ -95,6 +95,36 @@ SvgImportOptions parseOptions(const QJsonObject& obj, const SvgImportOptions& fa
     if (obj.contains(QStringLiteral("offsetY"))) {
         opts.offsetY = obj.value(QStringLiteral("offsetY")).toDouble(opts.offsetY);
     }
+    if (obj.contains(QStringLiteral("normalizeToBlackFill"))) {
+        opts.normalizeToBlackFill = obj.value(QStringLiteral("normalizeToBlackFill")).toBool(opts.normalizeToBlackFill);
+    }
+    if (obj.contains(QStringLiteral("whiteAsCutout"))) {
+        opts.whiteAsCutout = obj.value(QStringLiteral("whiteAsCutout")).toBool(opts.whiteAsCutout);
+    }
+    if (obj.contains(QStringLiteral("keepStrokes"))) {
+        opts.keepStrokes = obj.value(QStringLiteral("keepStrokes")).toBool(opts.keepStrokes);
+    }
+    if (obj.contains(QStringLiteral("stripTinyPaths"))) {
+        opts.stripTinyPaths = obj.value(QStringLiteral("stripTinyPaths")).toBool(opts.stripTinyPaths);
+    }
+    if (obj.contains(QStringLiteral("minGeometryExtent"))) {
+        opts.minGeometryExtent = obj.value(QStringLiteral("minGeometryExtent")).toDouble(opts.minGeometryExtent);
+    }
+    if (obj.contains(QStringLiteral("useAlpha"))) {
+        opts.useAlpha = obj.value(QStringLiteral("useAlpha")).toBool(opts.useAlpha);
+    }
+    if (obj.contains(QStringLiteral("bitmapThreshold"))) {
+        opts.bitmapThreshold = obj.value(QStringLiteral("bitmapThreshold")).toInt(opts.bitmapThreshold);
+    }
+    if (obj.contains(QStringLiteral("invertBitmap"))) {
+        opts.invertBitmap = obj.value(QStringLiteral("invertBitmap")).toBool(opts.invertBitmap);
+    }
+    if (obj.contains(QStringLiteral("minSpeckleArea"))) {
+        opts.minSpeckleArea = obj.value(QStringLiteral("minSpeckleArea")).toInt(opts.minSpeckleArea);
+    }
+    if (obj.contains(QStringLiteral("curveSmoothing"))) {
+        opts.curveSmoothing = obj.value(QStringLiteral("curveSmoothing")).toDouble(opts.curveSmoothing);
+    }
     return opts;
 }
 
@@ -110,6 +140,16 @@ QJsonObject serializeOptions(const SvgImportOptions& opts) {
     obj.insert(QStringLiteral("marginRatio"), opts.marginRatio);
     obj.insert(QStringLiteral("offsetX"), opts.offsetX);
     obj.insert(QStringLiteral("offsetY"), opts.offsetY);
+    obj.insert(QStringLiteral("normalizeToBlackFill"), opts.normalizeToBlackFill);
+    obj.insert(QStringLiteral("whiteAsCutout"), opts.whiteAsCutout);
+    obj.insert(QStringLiteral("keepStrokes"), opts.keepStrokes);
+    obj.insert(QStringLiteral("stripTinyPaths"), opts.stripTinyPaths);
+    obj.insert(QStringLiteral("minGeometryExtent"), opts.minGeometryExtent);
+    obj.insert(QStringLiteral("useAlpha"), opts.useAlpha);
+    obj.insert(QStringLiteral("bitmapThreshold"), opts.bitmapThreshold);
+    obj.insert(QStringLiteral("invertBitmap"), opts.invertBitmap);
+    obj.insert(QStringLiteral("minSpeckleArea"), opts.minSpeckleArea);
+    obj.insert(QStringLiteral("curveSmoothing"), opts.curveSmoothing);
     return obj;
 }
 

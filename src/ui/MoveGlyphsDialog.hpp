@@ -7,6 +7,7 @@
 #include <QLineEdit>
 #include <QTableWidget>
 #include <QCheckBox>
+#include <QTimer>
 
 namespace ffgui {
 
@@ -22,6 +23,7 @@ public:
     MoveGlyphsRequest moveRequest() const;
 
 private slots:
+    void onTargetTextChanged();
     void onTargetCodePointChanged();
 
 private:
@@ -36,6 +38,7 @@ private:
     QLabel* m_statusLabel = nullptr;
     QTableWidget* m_previewTable = nullptr;
     QPushButton* m_moveBtn = nullptr;
+    QTimer* m_debounceTimer = nullptr;
 
     int32_t m_parsedStartCp = -1;
     bool m_hasConflicts = false;

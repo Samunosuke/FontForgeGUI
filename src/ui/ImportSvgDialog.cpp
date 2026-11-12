@@ -1,4 +1,5 @@
 #include "ui/ImportSvgDialog.hpp"
+#include "model/FontSettingsUtils.hpp"
 
 #include <QCheckBox>
 #include <QComboBox>
@@ -18,6 +19,7 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
+#include <QMessageBox>
 #include <QMimeData>
 #include <QMouseEvent>
 #include <QPainter>
@@ -853,15 +855,27 @@ ImportSvgDialog::ImportSvgDialog(const GlyphSummary& targetGlyph, const FontSumm
     optionsRow->addWidget(importGroup, 1);
     rootLayout->addLayout(optionsRow);
 
+    auto* bottomRow = new QHBoxLayout();
+    auto* saveDefBtn = new QPushButton(tr("Save as Default"), this);
+    saveDefBtn->setToolTip(tr("Save current import parameters as application-wide default"));
+    auto* resetDefBtn = new QPushButton(tr("Reset Defaults"), this);
+    resetDefBtn->setToolTip(tr("Reset import parameters to factory defaults"));
+    bottomRow->addWidget(saveDefBtn);
+    bottomRow->addWidget(resetDefBtn);
+    bottomRow->addStretch(1);
+
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Cancel, this);
     m_importBtn = buttons->addButton(tr("Import into Glyph"), QDialogButtonBox::AcceptRole);
     m_importBtn->setEnabled(false);
-    rootLayout->addWidget(buttons);
+    bottomRow->addWidget(buttons);
+    rootLayout->addLayout(bottomRow);
 
     // Wire signals
     connect(browseBtn, &QPushButton::clicked, this, &ImportSvgDialog::onBrowseClicked);
     connect(buttons, &QDialogButtonBox::accepted, this, &QDialog::accept);
     connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
+    connect(saveDefBtn, &QPushButton::clicked, this, &ImportSvgDialog::onSaveAsDefaultClicked);
+    connect(resetDefBtn, &QPushButton::clicked, this, &ImportSvgDialog::onResetToDefaultsClicked);
 
     for (QCheckBox* cb : {m_stripMetadataCheck, m_removeHiddenCheck, m_removeBgRectsCheck,
                           m_stripNoFillCheck, m_keepStrokesCheck, m_normalizeBlackCheck,
@@ -923,6 +937,7 @@ ImportSvgDialog::ImportSvgDialog(const GlyphSummary& targetGlyph, const FontSumm
         },
         [this]() { resetPlacementControls(); });
 
+    applyDefaultOptions(loadDefaultImportOptions());
     updatePlacementPreview();
 
     if (!initialFilePath.isEmpty()) {
@@ -1251,7 +1266,56 @@ SvgImportOptions ImportSvgDialog::importOptions() const {
     opts.scaleFactor = m_scaleSpin ? (m_scaleSpin->value() / 100.0) : 1.0;
     opts.offsetX = m_offsetXSpin ? m_offsetXSpin->value() : 0.0;
     opts.offsetY = m_offsetYSpin ? m_offsetYSpin->value() : 0.0;
+
+    opts.normalizeToBlackFill = m_normalizeBlackCheck->isChecked();
+    opts.whiteAsCutout = m_whiteCutoutCheck->isChecked();
+    opts.keepStrokes = m_keepStrokesCheck->isChecked();
+    opts.stripTinyPaths = m_stripTinyCheck->isChecked();
+    opts.minGeometryExtent = m_minExtentSpin->value();
+    opts.useAlpha = m_pngUseAlphaCheck->isChecked();
+    opts.bitmapThreshold = m_pngThresholdSpin->value();
+    opts.invertBitmap = m_pngInvertCheck->isChecked();
+    opts.minSpeckleArea = m_pngDespeckleSpin->value();
+    opts.curveSmoothing = m_pngSmoothingSlider->value() / 100.0;
     return opts;
+}
+
+void ImportSvgDialog::applyDefaultOptions(const SvgImportOptions& opts) {
+    if (m_placementModeCombo) {
+        const int idx = m_placementModeCombo->findData(static_cast<int>(opts.placementMode));
+        if (idx >= 0) m_placementModeCombo->setCurrentIndex(idx);
+    }
+    if (m_scaleSpin) m_scaleSpin->setValue((opts.scaleFactor > 0.01 ? opts.scaleFactor : 1.0) * 100.0);
+    if (m_scaleToEmCheck) m_scaleToEmCheck->setChecked(opts.scaleToEm);
+    if (m_simplifyCheck) m_simplifyCheck->setChecked(opts.simplify);
+    if (m_correctDirCheck) m_correctDirCheck->setChecked(opts.correctDirection);
+    if (m_removeOverlapCheck) m_removeOverlapCheck->setChecked(opts.removeOverlap);
+    if (m_roundToIntCheck) m_roundToIntCheck->setChecked(opts.roundToInt);
+    if (m_normalizeBlackCheck) m_normalizeBlackCheck->setChecked(opts.normalizeToBlackFill);
+    if (m_whiteCutoutCheck) m_whiteCutoutCheck->setChecked(opts.whiteAsCutout);
+    if (m_keepStrokesCheck) m_keepStrokesCheck->setChecked(opts.keepStrokes);
+    if (m_stripTinyCheck) m_stripTinyCheck->setChecked(opts.stripTinyPaths);
+    if (m_minExtentSpin) m_minExtentSpin->setValue(opts.minGeometryExtent > 0.0 ? opts.minGeometryExtent : 1.0);
+    if (m_pngUseAlphaCheck) m_pngUseAlphaCheck->setChecked(opts.useAlpha);
+    if (m_pngInvertCheck) m_pngInvertCheck->setChecked(opts.invertBitmap);
+    if (m_pngThresholdSpin) m_pngThresholdSpin->setValue(opts.bitmapThreshold > 0 ? opts.bitmapThreshold : 128);
+    if (m_pngDespeckleSpin) m_pngDespeckleSpin->setValue(opts.minSpeckleArea >= 0 ? opts.minSpeckleArea : 4);
+    if (m_pngSmoothingSlider) m_pngSmoothingSlider->setValue(static_cast<int>((opts.curveSmoothing >= 0.0 ? opts.curveSmoothing : 0.75) * 100.0));
+}
+
+void ImportSvgDialog::onSaveAsDefaultClicked() {
+    saveDefaultImportOptions(importOptions());
+    QMessageBox::information(this, tr("Saved Defaults"),
+                             tr("Current parameters saved as application default for SVG and PNG imports."));
+}
+
+void ImportSvgDialog::onResetToDefaultsClicked() {
+    resetDefaultImportOptions();
+    applyDefaultOptions(SvgImportOptions());
+    refreshFilterPreview();
+    updatePlacementPreview();
+    QMessageBox::information(this, tr("Reset Defaults"),
+                             tr("Import parameters have been reset to factory defaults."));
 }
 
 } // namespace ffgui

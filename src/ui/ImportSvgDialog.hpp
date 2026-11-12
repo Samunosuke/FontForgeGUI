@@ -52,9 +52,12 @@ private slots:
     void refreshFilterPreview();
     void updatePlacementPreview();
     void resetPlacementControls();
+    void onSaveAsDefaultClicked();
+    void onResetToDefaultsClicked();
 
 private:
     void rebuildColorCheckboxes(const QStringList& colors);
+    void applyDefaultOptions(const SvgImportOptions& opts);
     SvgFilterOptions currentFilterOptions() const;
     BitmapTraceOptions currentTraceOptions() const;
     double effectivePreviewAdvanceWidth() const;

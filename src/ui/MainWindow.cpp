@@ -8,6 +8,7 @@
 #include "ui/CreateGlyphDialog.hpp"
 #include "ui/ExportFontDialog.hpp"
 #include "ui/FontMetadataDialog.hpp"
+#include "ui/ImportFilterSettingsDialog.hpp"
 #include "ui/GlyphGridDelegate.hpp"
 #include "ui/GlyphGridView.hpp"
 #include "ui/GlyphInspectorPanel.hpp"
@@ -306,6 +307,15 @@ void MainWindow::setupMenusAndToolbar() {
                                         &MainWindow::onCloseFontClicked);
     fileMenu->addSeparator();
     fileMenu->addAction(tr("E&xit"), QKeySequence::Quit, this, &QWidget::close);
+
+    auto* editMenu = menuBar()->addMenu(tr("&Edit"));
+    editMenu->addAction(tr("&Import Preferences…"), this, [this]() {
+        ImportFilterSettingsDialog dlg(loadDefaultImportOptions(), this);
+        if (dlg.exec() == QDialog::Accepted) {
+            saveDefaultImportOptions(dlg.importOptions());
+            statusBar()->showMessage(tr("Default import preferences saved"), 4000);
+        }
+    });
 
     auto* fontMenu = menuBar()->addMenu(tr("F&ont"));
     m_newGlyphAction = fontMenu->addAction(tr("&New Glyph…"), QKeySequence(QStringLiteral("Ctrl+Shift+N")), this,
@@ -731,8 +741,13 @@ void MainWindow::onGlyphCreationFailed(const QString& error) {
 void MainWindow::onGlyphsMoved(const ffgui::MoveGlyphsResult& result) {
     setBusy(false);
     m_modified = true;
-    for (const auto& g : result.updatedGlyphs) {
-        m_model->updateGlyph(g);
+    if (!result.snapshot.glyphs.isEmpty()) {
+        m_model->setDocument(result.snapshot);
+        m_inspector->setFontSummary(result.snapshot.summary);
+    } else {
+        for (const auto& g : result.updatedGlyphs) {
+            m_model->updateGlyph(g);
+        }
     }
     onGlyphSelectionChanged();
     updateWindowTitleAndCounts();
@@ -748,11 +763,16 @@ void MainWindow::onGlyphsMoveFailed(const QString& error) {
 void MainWindow::onBatchImportCompleted(const ffgui::BatchImportResult& result) {
     setBusy(false);
     m_modified = true;
-    for (const auto& g : result.updatedGlyphs) {
-        m_model->updateGlyph(g);
+    if (!result.snapshot.glyphs.isEmpty()) {
+        m_model->setDocument(result.snapshot);
+        m_inspector->setFontSummary(result.snapshot.summary);
+    } else {
+        for (const auto& g : result.updatedGlyphs) {
+            m_model->updateGlyph(g);
+        }
+        m_model->setFontSummary(result.updatedFontSummary);
+        m_inspector->setFontSummary(result.updatedFontSummary);
     }
-    m_model->setFontSummary(result.updatedFontSummary);
-    m_inspector->setFontSummary(result.updatedFontSummary);
     onGlyphSelectionChanged();
     updateWindowTitleAndCounts();
 

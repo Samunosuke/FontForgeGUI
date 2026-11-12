@@ -1,5 +1,6 @@
 #include "backend/FontForgeBridge.hpp"
 #include "model/BatchImportDefinition.hpp"
+#include "model/FontSettingsUtils.hpp"
 #include "model/UnicodeRangeFilter.hpp"
 
 #include <QDir>
@@ -26,6 +27,8 @@ using namespace ffgui;
 
 int main(int argc, char* argv[]) {
     QGuiApplication app(argc, argv);
+    app.setOrganizationName(QStringLiteral("FontForgeGUI"));
+    app.setApplicationName(QStringLiteral("FontForgeGUI"));
 
     QTemporaryDir tempDir;
     CHECK(tempDir.isValid());
@@ -105,6 +108,8 @@ int main(int argc, char* argv[]) {
     CHECK(bridge.batchImport(job, &bRes, &err));
     CHECK(bRes.importedCount == 3);
     CHECK(bRes.skippedCount == 0);
+    CHECK(!bRes.snapshot.glyphs.isEmpty());
+    CHECK(bRes.snapshot.glyphs.size() >= 3);
 
     // Save and re-load to verify persistence
     const QString fontOutPath = QDir(tempDir.path()).filePath(QStringLiteral("test_v05.sfd"));
@@ -150,6 +155,8 @@ int main(int argc, char* argv[]) {
     CHECK(okRes.movedCount == 2);
     CHECK(okRes.updatedGlyphs[0].unicode == 0xF0010);
     CHECK(okRes.updatedGlyphs[1].unicode == 0xF0011);
+    CHECK(!okRes.snapshot.glyphs.isEmpty());
+    CHECK(okRes.snapshot.glyphs.size() >= 3);
 
     // -------------------------------------------------------------------------
     // 4. Batch Import JSON Definition File Load/Save
@@ -163,6 +170,21 @@ int main(int argc, char* argv[]) {
     CHECK(loadedJob.items.size() == 3);
     CHECK(loadedJob.items[0].unicode == 0xF0001);
     CHECK(loadedJob.items[1].glyphName == QStringLiteral("circle_icon"));
+
+    // -------------------------------------------------------------------------
+    // 5. Default Import Options Persistence via QSettings
+    // -------------------------------------------------------------------------
+    SvgImportOptions testDefaults;
+    testDefaults.scaleFactor = 1.35;
+    testDefaults.bitmapThreshold = 185;
+    testDefaults.normalizeToBlackFill = false;
+    saveDefaultImportOptions(testDefaults);
+
+    SvgImportOptions loadedDefaults = loadDefaultImportOptions();
+    CHECK(std::abs(loadedDefaults.scaleFactor - 1.35) < 1e-4);
+    CHECK(loadedDefaults.bitmapThreshold == 185);
+    CHECK(loadedDefaults.normalizeToBlackFill == false);
+    resetDefaultImportOptions();
 
     bridge.closeFont();
     return 0;

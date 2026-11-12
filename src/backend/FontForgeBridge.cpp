@@ -930,6 +930,7 @@ bool FontForgeBridge::moveGlyphs(const MoveGlyphsRequest& request, MoveGlyphsRes
     }
 
     GlyphHashFree(sf);
+    result.snapshot = buildSnapshot(sf, m_impl->fv, m_impl->currentPath);
     if (outResult != nullptr) {
         *outResult = std::move(result);
     }
@@ -1476,9 +1477,11 @@ bool FontForgeBridge::batchImport(const BatchImportJob& job, BatchImportResult* 
 
         if (isPng) {
             BitmapTraceOptions traceOpts;
-            traceOpts.useAlpha = true;
-            traceOpts.threshold = 128;
-            traceOpts.curveSmoothing = 0.75;
+            traceOpts.useAlpha = importOpts.useAlpha;
+            traceOpts.threshold = importOpts.bitmapThreshold;
+            traceOpts.invert = importOpts.invertBitmap;
+            traceOpts.minSpeckleArea = importOpts.minSpeckleArea;
+            traceOpts.curveSmoothing = importOpts.curveSmoothing;
             BitmapTraceResult traceRes = BitmapTracer::traceFile(item.filePath, traceOpts);
             if (!traceRes.valid || traceRes.totalContours == 0) {
                 res.errors.append(QStringLiteral("Failed to trace PNG '%1': %2")
@@ -1496,10 +1499,13 @@ bool FontForgeBridge::batchImport(const BatchImportJob& job, BatchImportResult* 
             filterOpts.removeHiddenElements = true;
             filterOpts.removeBackgroundRects = true;
             filterOpts.stripNoFillElements = true;
-            filterOpts.keepStrokes = false;
-            filterOpts.normalizeToBlackFill = true;
-            filterOpts.whiteAsCutout = true;
-            filterOpts.stripTinyPaths = true;
+            filterOpts.keepStrokes = importOpts.keepStrokes;
+            filterOpts.normalizeToBlackFill = importOpts.normalizeToBlackFill;
+            filterOpts.whiteAsCutout = importOpts.whiteAsCutout;
+            filterOpts.stripTinyPaths = importOpts.stripTinyPaths;
+            filterOpts.minGeometryExtent = importOpts.minGeometryExtent;
+            filterOpts.excludedColors = importOpts.excludedColors;
+            filterOpts.includedColors = importOpts.includedColors;
             SvgSanitizeResult sanRes = SvgSanitizer::sanitizeFile(item.filePath, filterOpts);
             if (!sanRes.valid || sanRes.keptGeometryCount == 0) {
                 res.errors.append(QStringLiteral("Failed to parse SVG '%1': %2")
@@ -1532,6 +1538,7 @@ bool FontForgeBridge::batchImport(const BatchImportJob& job, BatchImportResult* 
     }
 
     res.updatedFontSummary = extractFontSummary(sf, m_impl->fv, m_impl->currentPath);
+    res.snapshot = buildSnapshot(sf, m_impl->fv, m_impl->currentPath);
     if (outResult != nullptr) {
         *outResult = std::move(res);
     }

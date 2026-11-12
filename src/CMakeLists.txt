@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(FontForgeGUI VERSION 0.5.0 LANGUAGES C CXX)
+project(FontForgeGUI VERSION 0.5.1 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -103,6 +103,8 @@ add_executable(FontForgeGUI WIN32
     ui/MoveGlyphsDialog.cpp
     ui/BatchImportDialog.hpp
     ui/BatchImportDialog.cpp
+    ui/ImportFilterSettingsDialog.hpp
+    ui/ImportFilterSettingsDialog.cpp
 )
 
 target_link_libraries(FontForgeGUI

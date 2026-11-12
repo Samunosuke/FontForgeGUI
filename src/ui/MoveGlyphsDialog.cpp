@@ -80,7 +80,17 @@ MoveGlyphsDialog::MoveGlyphsDialog(const QVector<GlyphSummary>& selectedGlyphs,
     connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
     root->addWidget(buttons);
 
-    connect(m_targetEdit, &QLineEdit::textChanged, this, &MoveGlyphsDialog::onTargetCodePointChanged);
+    m_debounceTimer = new QTimer(this);
+    m_debounceTimer->setSingleShot(true);
+    connect(m_debounceTimer, &QTimer::timeout, this, &MoveGlyphsDialog::onTargetCodePointChanged);
+
+    connect(m_targetEdit, &QLineEdit::textChanged, this, &MoveGlyphsDialog::onTargetTextChanged);
+    connect(m_targetEdit, &QLineEdit::editingFinished, this, [this]() {
+        if (m_debounceTimer->isActive()) {
+            m_debounceTimer->stop();
+            onTargetCodePointChanged();
+        }
+    });
     connect(m_overwriteCheck, &QCheckBox::toggled, this, &MoveGlyphsDialog::rebuildPreview);
 
     // Initial default proposal: first selected glyph's unicode or U+F0000
@@ -102,6 +112,12 @@ MoveGlyphsRequest MoveGlyphsDialog::moveRequest() const {
     return req;
 }
 
+void MoveGlyphsDialog::onTargetTextChanged() {
+    m_moveBtn->setEnabled(false);
+    m_statusLabel->setText(tr("Evaluating code points…"));
+    m_debounceTimer->start(300);
+}
+
 void MoveGlyphsDialog::onTargetCodePointChanged() {
     int32_t cp = -1;
     if (parseCp(m_targetEdit->text(), &cp)) {
@@ -114,15 +130,21 @@ void MoveGlyphsDialog::onTargetCodePointChanged() {
 
 void MoveGlyphsDialog::rebuildPreview() {
     const int count = m_selectedGlyphs.size();
-    m_previewTable->setRowCount(count);
+
+    m_previewTable->setUpdatesEnabled(false);
+    if (m_previewTable->rowCount() != count) {
+        m_previewTable->setRowCount(count);
+    }
 
     if (m_parsedStartCp < 0) {
+        m_previewTable->setUpdatesEnabled(true);
         m_statusLabel->setText(tr("<font color='#d9534f'>Please enter a valid hexadecimal Unicode (e.g. U+F0000 or 0xF0000).</font>"));
         m_moveBtn->setEnabled(false);
         return;
     }
 
     if (static_cast<int64_t>(m_parsedStartCp) + count - 1 > 0x10FFFF) {
+        m_previewTable->setUpdatesEnabled(true);
         m_statusLabel->setText(tr("<font color='#d9534f'>Target range exceeds maximum valid Unicode code point (U+10FFFF).</font>"));
         m_moveBtn->setEnabled(false);
         return;
@@ -138,14 +160,25 @@ void MoveGlyphsDialog::rebuildPreview() {
         const GlyphSummary& g = m_selectedGlyphs[i];
         const int32_t targetCp = m_parsedStartCp + i;
 
-        m_previewTable->setItem(i, 0, new QTableWidgetItem(g.name));
-        m_previewTable->setItem(i, 1, new QTableWidgetItem(QString::number(g.gid)));
-        m_previewTable->setItem(i, 2, new QTableWidgetItem(
-            g.unicode >= 0 ? QStringLiteral("U+%1").arg(g.unicode, 4, 16, QLatin1Char('0')).toUpper()
-                           : tr("Unencoded")));
+        auto setOrUpdateItem = [this, i](int col, const QString& text, const QColor* fg = nullptr) {
+            QTableWidgetItem* it = m_previewTable->item(i, col);
+            if (!it) {
+                it = new QTableWidgetItem(text);
+                if (fg) it->setForeground(*fg);
+                m_previewTable->setItem(i, col, it);
+            } else {
+                it->setText(text);
+                if (fg) it->setForeground(*fg);
+            }
+        };
+
+        setOrUpdateItem(0, g.name);
+        setOrUpdateItem(1, QString::number(g.gid));
+        setOrUpdateItem(2, g.unicode >= 0 ? QStringLiteral("U+%1").arg(g.unicode, 4, 16, QLatin1Char('0')).toUpper()
+                                          : tr("Unencoded"));
 
         const QString targetStr = QStringLiteral("U+%1").arg(targetCp, 4, 16, QLatin1Char('0')).toUpper();
-        m_previewTable->setItem(i, 3, new QTableWidgetItem(targetStr));
+        setOrUpdateItem(3, targetStr);
 
         // Check if targetCp is occupied by an unselected glyph
         QString statusText = tr("Free");
@@ -158,11 +191,10 @@ void MoveGlyphsDialog::rebuildPreview() {
                 break;
             }
         }
-
-        auto* statusItem = new QTableWidgetItem(statusText);
-        statusItem->setForeground(statusColor);
-        m_previewTable->setItem(i, 4, statusItem);
+        setOrUpdateItem(4, statusText, &statusColor);
     }
+
+    m_previewTable->setUpdatesEnabled(true);
 
     m_hasConflicts = (conflictCount > 0);
     if (m_hasConflicts && !m_overwriteCheck->isChecked()) {

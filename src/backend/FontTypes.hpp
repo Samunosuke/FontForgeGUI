@@ -133,6 +133,22 @@ struct SvgImportOptions {
     double marginRatio = 0.04; // Default side/top padding ratio when fitting
     double offsetX = 0.0;      // Manual X offset in font units
     double offsetY = 0.0;      // Manual Y offset in font units
+
+    // SVG & Vector cleaning options
+    bool normalizeToBlackFill = true;
+    bool whiteAsCutout = true;
+    bool keepStrokes = false;
+    bool stripTinyPaths = true;
+    double minGeometryExtent = 1.0;
+    QStringList excludedColors;
+    QStringList includedColors;
+
+    // Bitmap tracing options (for PNG)
+    bool useAlpha = true;
+    int bitmapThreshold = 128; // 1..254
+    bool invertBitmap = false;
+    int minSpeckleArea = 4;
+    double curveSmoothing = 0.75;
 };
 
 struct IconPlacementTransform {
@@ -259,6 +275,7 @@ struct MoveGlyphsRequest {
 struct MoveGlyphsResult {
     int movedCount = 0;
     QVector<GlyphSummary> updatedGlyphs;
+    FontDocumentSnapshot snapshot;
 };
 
 struct BatchImportItem {
@@ -281,6 +298,7 @@ struct BatchImportResult {
     QStringList errors;
     FontSummary updatedFontSummary;
     QVector<GlyphSummary> updatedGlyphs;
+    FontDocumentSnapshot snapshot;
 };
 
 } // namespace ffgui

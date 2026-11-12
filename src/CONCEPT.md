@@ -88,8 +88,11 @@ The UI is designed to be simple and easy to use.
       - (optional) import definition file in JSON format (where each glyph to import can be defined with code point, name, image file, filter parameters, the JSON should also allow to define a default import filter param set)
 - [x] Batch import of SVGs or PNGs (where unicode start point is defined beforehand, override mode / stopps with error if code points occupied ) - should be later also be called by command line or shell
 
-#### v0.5.1
-- [ ] Improve batch import (allow to set all default import parameters - this important when the batch import is startet from GUI) 
+#### v0.5.1 (Implemented)
+- [x] Debounced / delayed Start Code Point evaluation in `MoveGlyphsDialog` and `BatchImportDialog` (avoids UI freezing on typing, disables action button during evaluation)
+- [x] Full import filter parameters in GUI Batch Import (`ImportFilterSettingsDialog` for placement, scaling, colors, cutouts, stroke expansion, and PNG binarization/smoothing)
+- [x] Persistent application default import parameters in `QSettings` ("Save as Default" / "Reset Defaults" buttons + `Edit -> Import Preferences…` menu)
+- [x] Complete glyph grid reload after Batch Import and Move Glyphs (fresh `FontDocumentSnapshot` rendered immediately in grid) 
 
 #### v0.6
 - [ ] Edit Glyph outline and vectors (simple and easy to use graphical editor)

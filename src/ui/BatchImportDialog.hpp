@@ -10,6 +10,7 @@
 #include <QComboBox>
 #include <QDoubleSpinBox>
 #include <QProgressBar>
+#include <QTimer>
 
 namespace ffgui {
 
@@ -32,13 +33,16 @@ private slots:
     void onAddDirectoryClicked();
     void onLoadJsonClicked();
     void onSaveJsonClicked();
+    void onConfigureFilterClicked();
     void onClearClicked();
+    void onStartUnicodeTextChanged();
     void onStartUnicodeChanged();
     void onRecomputeRows();
 
 private:
     void addFilesToList(const QStringList& files);
     void updateTable();
+    void syncControlsFromOptions();
 
     FontSummary m_fontSummary;
     QVector<GlyphSummary> m_existingGlyphs;
@@ -50,9 +54,12 @@ private:
     QDoubleSpinBox* m_marginSpin = nullptr;
     QTableWidget* m_table = nullptr;
     QLabel* m_statsLabel = nullptr;
+    QLabel* m_filterSummaryLabel = nullptr;
     QPushButton* m_importBtn = nullptr;
+    QTimer* m_debounceTimer = nullptr;
 
     QVector<BatchImportItem> m_items;
+    SvgImportOptions m_defaultOptions;
     int32_t m_parsedStartCp = 0xF0000;
 };
 
