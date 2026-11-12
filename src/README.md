@@ -17,6 +17,12 @@ Modern cross-platform Qt 6 Widgets GUI for FontForge, built directly on headless
 
 ## Build & Run (Ubuntu / Linux)
 
+Install build dependencies using [`scripts/install_dependencies.sh`](../scripts/install_dependencies.sh):
+
+```bash
+./scripts/install_dependencies.sh
+```
+
 FontForge is referenced from the sibling repository `../FontForge` by default (override with `-DFONTFORGE_SOURCE_DIR=/path/to/FontForge`).
 
 ```bash
