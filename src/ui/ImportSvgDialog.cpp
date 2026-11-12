@@ -2,6 +2,7 @@
 #include "model/FontSettingsUtils.hpp"
 
 #include <QCheckBox>
+#include <QColorDialog>
 #include <QComboBox>
 #include <QCursor>
 #include <QDialogButtonBox>
@@ -749,26 +750,120 @@ ImportSvgDialog::ImportSvgDialog(const GlyphSummary& targetGlyph, const FontSumm
     m_pngTraceGroup = new QGroupBox(tr("PNG Contour Tracer Options"), this);
     auto* pngLayout = new QVBoxLayout(m_pngTraceGroup);
 
+    auto* bModeRow = new QHBoxLayout();
+    bModeRow->addWidget(new QLabel(tr("Binarization Mode:"), m_pngTraceGroup));
+    m_pngBinarizationCombo = new QComboBox(m_pngTraceGroup);
+    m_pngBinarizationCombo->addItem(tr("Alpha / Luminance (Standard)"),
+                                   static_cast<int>(BitmapBinarizationMode::AlphaOrLuminance));
+    m_pngBinarizationCombo->addItem(tr("Color Distance (Background Keying)"),
+                                   static_cast<int>(BitmapBinarizationMode::ColorDistance));
+    m_pngBinarizationCombo->addItem(tr("Dominant Color Palette"),
+                                   static_cast<int>(BitmapBinarizationMode::ColorPalette));
+    m_pngBinarizationCombo->addItem(tr("Edge Boundaries (Sobel Filter)"),
+                                   static_cast<int>(BitmapBinarizationMode::EdgeGradient));
+    bModeRow->addWidget(m_pngBinarizationCombo, 1);
+    pngLayout->addLayout(bModeRow);
+
+    // Alpha / Luminance controls container
+    m_pngAlphaLumaWidget = new QWidget(m_pngTraceGroup);
+    auto* alphaLumaLayout = new QVBoxLayout(m_pngAlphaLumaWidget);
+    alphaLumaLayout->setContentsMargins(0, 0, 0, 0);
+
     m_pngUseAlphaCheck = new QCheckBox(
         tr("Use alpha channel transparency (auto-fallback to luminance for opaque PNGs)"),
-        m_pngTraceGroup);
+        m_pngAlphaLumaWidget);
     m_pngUseAlphaCheck->setChecked(true);
+    alphaLumaLayout->addWidget(m_pngUseAlphaCheck);
+
+    auto* threshRow = new QHBoxLayout();
+    m_pngThresholdLabel = new QLabel(tr("Binarization Threshold:"), m_pngAlphaLumaWidget);
+    threshRow->addWidget(m_pngThresholdLabel);
+    m_pngThresholdSlider = new QSlider(Qt::Horizontal, m_pngAlphaLumaWidget);
+    m_pngThresholdSlider->setRange(1, 254);
+    m_pngThresholdSlider->setValue(128);
+    m_pngThresholdSpin = new QSpinBox(m_pngAlphaLumaWidget);
+    m_pngThresholdSpin->setRange(1, 254);
+    m_pngThresholdSpin->setValue(128);
+    threshRow->addWidget(m_pngThresholdSlider, 1);
+    threshRow->addWidget(m_pngThresholdSpin);
+    alphaLumaLayout->addLayout(threshRow);
+    pngLayout->addWidget(m_pngAlphaLumaWidget);
+
+    // Color Distance controls container
+    m_pngColorDistanceWidget = new QWidget(m_pngTraceGroup);
+    auto* distLayout = new QVBoxLayout(m_pngColorDistanceWidget);
+    distLayout->setContentsMargins(0, 0, 0, 0);
+
+    auto* bgRow = new QHBoxLayout();
+    m_pngAutoDetectBgCheck = new QCheckBox(tr("Auto-detect background color"), m_pngColorDistanceWidget);
+    m_pngAutoDetectBgCheck->setChecked(true);
+    bgRow->addWidget(m_pngAutoDetectBgCheck);
+
+    m_pngCustomBgColorBtn = new QPushButton(tr("Custom BG..."), m_pngColorDistanceWidget);
+    m_pngCustomBgColorBtn->setEnabled(false);
+    bgRow->addWidget(m_pngCustomBgColorBtn);
+
+    m_pngDetectedBgPreview = new QLabel(m_pngColorDistanceWidget);
+    m_pngDetectedBgPreview->setFixedSize(22, 22);
+    m_pngDetectedBgPreview->setStyleSheet(QStringLiteral("background-color: #FFFFFF; border: 1px solid #777; border-radius: 3px;"));
+    m_pngDetectedBgPreview->setToolTip(tr("Detected or chosen background color"));
+    bgRow->addWidget(m_pngDetectedBgPreview);
+    bgRow->addStretch(1);
+    distLayout->addLayout(bgRow);
+
+    auto* tolRow = new QHBoxLayout();
+    tolRow->addWidget(new QLabel(tr("Background Tolerance:"), m_pngColorDistanceWidget));
+    m_pngColorToleranceSlider = new QSlider(Qt::Horizontal, m_pngColorDistanceWidget);
+    m_pngColorToleranceSlider->setRange(1, 100);
+    m_pngColorToleranceSlider->setValue(15);
+    m_pngColorToleranceLabel = new QLabel(QStringLiteral("15 %"), m_pngColorDistanceWidget);
+    m_pngColorToleranceLabel->setMinimumWidth(40);
+    tolRow->addWidget(m_pngColorToleranceSlider, 1);
+    tolRow->addWidget(m_pngColorToleranceLabel);
+    distLayout->addLayout(tolRow);
+    pngLayout->addWidget(m_pngColorDistanceWidget);
+
+    // Palette selection widget
+    m_pngPaletteWidget = new QWidget(m_pngTraceGroup);
+    auto* palOuterLayout = new QVBoxLayout(m_pngPaletteWidget);
+    palOuterLayout->setContentsMargins(0, 0, 0, 0);
+    palOuterLayout->addWidget(new QLabel(tr("Dominant Palette (Click colors to include/exclude):"), m_pngPaletteWidget));
+
+    auto* palBtnContainer = new QWidget(m_pngPaletteWidget);
+    m_pngPaletteLayout = new QHBoxLayout(palBtnContainer);
+    m_pngPaletteLayout->setContentsMargins(0, 0, 0, 0);
+    m_pngPaletteLayout->setSpacing(6);
+    palOuterLayout->addWidget(palBtnContainer);
+
+    auto* palActionRow = new QHBoxLayout();
+    auto* selectAllBtn = new QPushButton(tr("Select All Non-BG"), m_pngPaletteWidget);
+    auto* clearAllBtn = new QPushButton(tr("Clear All"), m_pngPaletteWidget);
+    palActionRow->addWidget(selectAllBtn);
+    palActionRow->addWidget(clearAllBtn);
+    palActionRow->addStretch(1);
+    palOuterLayout->addLayout(palActionRow);
+
+    connect(selectAllBtn, &QPushButton::clicked, this, [this]() {
+        m_selectedPaletteColors.clear();
+        for (QPushButton* btn : m_pngPaletteButtons) {
+            btn->setChecked(true);
+        }
+        refreshFilterPreview();
+    });
+    connect(clearAllBtn, &QPushButton::clicked, this, [this]() {
+        m_selectedPaletteColors.clear();
+        for (QPushButton* btn : m_pngPaletteButtons) {
+            btn->setChecked(false);
+        }
+        refreshFilterPreview();
+    });
+
+    pngLayout->addWidget(m_pngPaletteWidget);
 
     m_pngInvertCheck =
         new QCheckBox(tr("Invert foreground / background (for light icons on dark background)"),
                       m_pngTraceGroup);
     m_pngInvertCheck->setChecked(false);
-
-    auto* threshRow = new QHBoxLayout();
-    threshRow->addWidget(new QLabel(tr("Binarization Threshold:"), m_pngTraceGroup));
-    m_pngThresholdSlider = new QSlider(Qt::Horizontal, m_pngTraceGroup);
-    m_pngThresholdSlider->setRange(1, 254);
-    m_pngThresholdSlider->setValue(128);
-    m_pngThresholdSpin = new QSpinBox(m_pngTraceGroup);
-    m_pngThresholdSpin->setRange(1, 254);
-    m_pngThresholdSpin->setValue(128);
-    threshRow->addWidget(m_pngThresholdSlider, 1);
-    threshRow->addWidget(m_pngThresholdSpin);
 
     auto* despeckleRow = new QHBoxLayout();
     despeckleRow->addWidget(new QLabel(tr("Ignore noise speckles smaller than:"), m_pngTraceGroup));
@@ -801,14 +896,14 @@ ImportSvgDialog::ImportSvgDialog(const GlyphSummary& targetGlyph, const FontSumm
     smoothRow->addWidget(m_pngSmoothingSlider, 1);
     smoothRow->addWidget(m_pngSmoothingValLabel);
 
-    pngLayout->addWidget(m_pngUseAlphaCheck);
     pngLayout->addWidget(m_pngInvertCheck);
-    pngLayout->addLayout(threshRow);
     pngLayout->addLayout(despeckleRow);
     pngLayout->addLayout(simplifyRow);
     pngLayout->addLayout(smoothRow);
     pngLayout->addStretch(1);
     m_pngTraceGroup->setVisible(false);
+
+    updateBinarizationModeVisibility();
 
     // 3) FontForge Glyph Import Options group
     auto* importGroup = new QGroupBox(tr("FontForge Glyph Import Options"), this);
@@ -887,6 +982,27 @@ ImportSvgDialog::ImportSvgDialog(const GlyphSummary& targetGlyph, const FontSumm
     connect(m_stripTinyCheck, &QCheckBox::toggled, m_minExtentSpin, &QWidget::setEnabled);
 
     // PNG tracer signals
+    connect(m_pngBinarizationCombo, &QComboBox::currentIndexChanged, this, [this]() {
+        updateBinarizationModeVisibility();
+        refreshFilterPreview();
+    });
+    connect(m_pngAutoDetectBgCheck, &QCheckBox::toggled, this, [this](bool autoDetect) {
+        m_pngCustomBgColorBtn->setEnabled(!autoDetect);
+        refreshFilterPreview();
+    });
+    connect(m_pngCustomBgColorBtn, &QPushButton::clicked, this, [this]() {
+        const QColor col = QColorDialog::getColor(QColor(m_customBgColor), this, tr("Select Background Color"));
+        if (col.isValid()) {
+            m_customBgColor = col.rgb();
+            m_pngDetectedBgPreview->setStyleSheet(
+                QStringLiteral("background-color: %1; border: 1px solid #777; border-radius: 3px;").arg(col.name()));
+            refreshFilterPreview();
+        }
+    });
+    connect(m_pngColorToleranceSlider, &QSlider::valueChanged, this, [this](int val) {
+        m_pngColorToleranceLabel->setText(QStringLiteral("%1 %").arg(val));
+        refreshFilterPreview();
+    });
     connect(m_pngUseAlphaCheck, &QCheckBox::toggled, this, &ImportSvgDialog::refreshFilterPreview);
     connect(m_pngInvertCheck, &QCheckBox::toggled, this, &ImportSvgDialog::refreshFilterPreview);
     connect(m_pngThresholdSlider, &QSlider::valueChanged, m_pngThresholdSpin, &QSpinBox::setValue);
@@ -998,6 +1114,9 @@ void ImportSvgDialog::loadInputFile(const QString& path) {
     if (isPng) {
         m_rawSvg.clear();
         m_rawImage = QImage(path);
+        m_selectedPaletteColors.clear();
+        m_lastTraceResult = BitmapTraceResult{};
+        updatePaletteButtons({}, 0xFFFFFFFF);
         if (m_rawImage.isNull()) {
             m_originalPreview->setTitle(tr("Original PNG Image"));
             m_originalPreview->setRasterImage(QImage(), tr("Failed to load PNG image."));
@@ -1078,12 +1197,21 @@ SvgFilterOptions ImportSvgDialog::currentFilterOptions() const {
 
 BitmapTraceOptions ImportSvgDialog::currentTraceOptions() const {
     BitmapTraceOptions opts;
+    opts.binarizationMode = static_cast<BitmapBinarizationMode>(
+        m_pngBinarizationCombo ? m_pngBinarizationCombo->currentData().toInt() : 0);
     opts.useAlpha = m_pngUseAlphaCheck->isChecked();
     opts.threshold = m_pngThresholdSpin->value();
     opts.invert = m_pngInvertCheck->isChecked();
     opts.minSpeckleArea = m_pngDespeckleSpin->value();
     opts.simplifyTolerance = m_pngSimplifySpin->value();
     opts.curveSmoothing = static_cast<double>(m_pngSmoothingSlider->value()) / 100.0;
+
+    opts.autoDetectBgColor = m_pngAutoDetectBgCheck ? m_pngAutoDetectBgCheck->isChecked() : true;
+    opts.customBgColor = m_customBgColor;
+    opts.colorTolerance = m_pngColorToleranceSlider
+                              ? (static_cast<double>(m_pngColorToleranceSlider->value()) / 100.0)
+                              : 0.15;
+    opts.selectedPaletteColors = m_selectedPaletteColors;
     return opts;
 }
 
@@ -1143,6 +1271,20 @@ void ImportSvgDialog::refreshFilterPreview() {
         m_lastResult.cutoutGeometryCount = m_lastTraceResult.holeContours;
         m_currentInkBounds = m_lastTraceResult.inkBounds;
 
+        if (m_pngDetectedBgPreview) {
+            const QColor detCol(m_lastTraceResult.detectedBgColor);
+            m_pngDetectedBgPreview->setStyleSheet(
+                QStringLiteral("background-color: %1; border: 1px solid #777; border-radius: 3px;").arg(detCol.name()));
+            m_pngDetectedBgPreview->setToolTip(tr("Detected/Active Background: %1").arg(detCol.name()));
+        }
+
+        if (m_pngBinarizationCombo &&
+            m_pngBinarizationCombo->currentData().toInt() == static_cast<int>(BitmapBinarizationMode::ColorPalette)) {
+            if (m_pngPaletteButtons.size() != m_lastTraceResult.extractedPalette.size()) {
+                updatePaletteButtons(m_lastTraceResult.extractedPalette, m_lastTraceResult.detectedBgColor);
+            }
+        }
+
         if (m_lastTraceResult.totalContours == 0) {
             m_placementPreview->setContent(QByteArray(), m_lastResult.viewBox, QRectF(),
                                            importOptions(),
@@ -1153,8 +1295,21 @@ void ImportSvgDialog::refreshFilterPreview() {
             return;
         }
 
-        const QString modeStr =
-            m_lastTraceResult.usedAlphaChannel ? tr("Alpha channel") : tr("Luminance");
+        QString modeStr;
+        switch (currentTraceOptions().binarizationMode) {
+        case BitmapBinarizationMode::ColorDistance:
+            modeStr = tr("Color distance");
+            break;
+        case BitmapBinarizationMode::ColorPalette:
+            modeStr = tr("Color palette");
+            break;
+        case BitmapBinarizationMode::EdgeGradient:
+            modeStr = tr("Sobel edges");
+            break;
+        default:
+            modeStr = m_lastTraceResult.usedAlphaChannel ? tr("Alpha channel") : tr("Luminance");
+            break;
+        }
         m_statsLabel->setText(
             tr("PNG Traced (%1) — Image: %2×%3 px · Contours: <b>%4</b> (%5 outer, %6 holes) · "
                "Control nodes: %7")
@@ -1277,6 +1432,13 @@ SvgImportOptions ImportSvgDialog::importOptions() const {
     opts.invertBitmap = m_pngInvertCheck->isChecked();
     opts.minSpeckleArea = m_pngDespeckleSpin->value();
     opts.curveSmoothing = m_pngSmoothingSlider->value() / 100.0;
+    opts.binarizationMode = static_cast<BitmapBinarizationMode>(
+        m_pngBinarizationCombo ? m_pngBinarizationCombo->currentData().toInt() : 0);
+    opts.autoDetectBgColor = m_pngAutoDetectBgCheck ? m_pngAutoDetectBgCheck->isChecked() : true;
+    opts.customBgColor = QColor(m_customBgColor).name();
+    opts.colorTolerance = m_pngColorToleranceSlider
+                              ? (static_cast<double>(m_pngColorToleranceSlider->value()) / 100.0)
+                              : 0.15;
     return opts;
 }
 
@@ -1301,6 +1463,128 @@ void ImportSvgDialog::applyDefaultOptions(const SvgImportOptions& opts) {
     if (m_pngThresholdSpin) m_pngThresholdSpin->setValue(opts.bitmapThreshold > 0 ? opts.bitmapThreshold : 128);
     if (m_pngDespeckleSpin) m_pngDespeckleSpin->setValue(opts.minSpeckleArea >= 0 ? opts.minSpeckleArea : 4);
     if (m_pngSmoothingSlider) m_pngSmoothingSlider->setValue(static_cast<int>((opts.curveSmoothing >= 0.0 ? opts.curveSmoothing : 0.75) * 100.0));
+
+    if (m_pngBinarizationCombo) {
+        const int idx = m_pngBinarizationCombo->findData(static_cast<int>(opts.binarizationMode));
+        if (idx >= 0) m_pngBinarizationCombo->setCurrentIndex(idx);
+    }
+    if (m_pngAutoDetectBgCheck) {
+        m_pngAutoDetectBgCheck->setChecked(opts.autoDetectBgColor);
+    }
+    if (!opts.customBgColor.isEmpty()) {
+        const QColor c(opts.customBgColor);
+        if (c.isValid()) {
+            m_customBgColor = c.rgb();
+            if (m_pngDetectedBgPreview) {
+                m_pngDetectedBgPreview->setStyleSheet(
+                    QStringLiteral("background-color: %1; border: 1px solid #777; border-radius: 3px;").arg(c.name()));
+            }
+        }
+    }
+    if (m_pngColorToleranceSlider) {
+        const int tolVal = std::clamp(static_cast<int>(std::round(opts.colorTolerance * 100.0)), 1, 100);
+        m_pngColorToleranceSlider->setValue(tolVal);
+        if (m_pngColorToleranceLabel) {
+            m_pngColorToleranceLabel->setText(QStringLiteral("%1 %").arg(tolVal));
+        }
+    }
+    updateBinarizationModeVisibility();
+}
+
+void ImportSvgDialog::updateBinarizationModeVisibility() {
+    if (!m_pngBinarizationCombo) {
+        return;
+    }
+    const auto mode = static_cast<BitmapBinarizationMode>(
+        m_pngBinarizationCombo->currentData().toInt());
+
+    const bool isAlphaLuma = (mode == BitmapBinarizationMode::AlphaOrLuminance);
+    const bool isEdge = (mode == BitmapBinarizationMode::EdgeGradient);
+    const bool isDist = (mode == BitmapBinarizationMode::ColorDistance);
+    const bool isPalette = (mode == BitmapBinarizationMode::ColorPalette);
+
+    if (m_pngAlphaLumaWidget) {
+        m_pngAlphaLumaWidget->setVisible(isAlphaLuma || isEdge);
+    }
+    if (m_pngUseAlphaCheck) {
+        m_pngUseAlphaCheck->setVisible(isAlphaLuma);
+    }
+    if (m_pngThresholdLabel) {
+        m_pngThresholdLabel->setText(isEdge ? tr("Edge Sensitivity:") : tr("Binarization Threshold:"));
+    }
+
+    if (m_pngColorDistanceWidget) {
+        m_pngColorDistanceWidget->setVisible(isDist || isPalette);
+    }
+    if (m_pngPaletteWidget) {
+        m_pngPaletteWidget->setVisible(isPalette);
+    }
+}
+
+void ImportSvgDialog::updatePaletteButtons(const QVector<QRgb>& palette, QRgb bg) {
+    if (!m_pngPaletteLayout) {
+        return;
+    }
+
+    QLayoutItem* item = nullptr;
+    while ((item = m_pngPaletteLayout->takeAt(0)) != nullptr) {
+        if (item->widget()) {
+            item->widget()->deleteLater();
+        }
+        delete item;
+    }
+    m_pngPaletteButtons.clear();
+
+    if (palette.isEmpty()) {
+        return;
+    }
+
+    if (m_selectedPaletteColors.isEmpty()) {
+        for (QRgb c : palette) {
+            if (BitmapTracer::perceptualColorDistance(c, bg) >= 0.15) {
+                m_selectedPaletteColors.append(c);
+            }
+        }
+    }
+
+    for (QRgb color : palette) {
+        const QColor qcol(color);
+        auto* btn = new QPushButton(m_pngPaletteWidget);
+        btn->setCheckable(true);
+        btn->setFixedSize(28, 28);
+        btn->setCursor(Qt::PointingHandCursor);
+        btn->setToolTip(tr("Color %1 (Click to include/exclude)").arg(qcol.name()));
+
+        const bool isSelected = m_selectedPaletteColors.contains(color);
+        btn->setChecked(isSelected);
+
+        auto updateStyle = [btn, qcol](bool checked) {
+            btn->setStyleSheet(QStringLiteral(
+                "QPushButton {"
+                "  background-color: %1;"
+                "  border: %2;"
+                "  border-radius: 4px;"
+                "}"
+            ).arg(qcol.name(), checked ? QStringLiteral("3px solid #0078D4") : QStringLiteral("1px solid #777")));
+        };
+        updateStyle(isSelected);
+
+        connect(btn, &QPushButton::toggled, this, [this, color, updateStyle, btn](bool checked) {
+            updateStyle(checked);
+            if (checked) {
+                if (!m_selectedPaletteColors.contains(color)) {
+                    m_selectedPaletteColors.append(color);
+                }
+            } else {
+                m_selectedPaletteColors.removeAll(color);
+            }
+            refreshFilterPreview();
+        });
+
+        m_pngPaletteButtons.append(btn);
+        m_pngPaletteLayout->addWidget(btn);
+    }
+    m_pngPaletteLayout->addStretch(1);
 }
 
 void ImportSvgDialog::onSaveAsDefaultClicked() {

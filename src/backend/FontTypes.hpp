@@ -113,6 +113,13 @@ enum class GlyphPlacementMode {
     OriginalSvgCoords = 4 // Keep raw FontForge SVG coordinates
 };
 
+enum class BitmapBinarizationMode {
+    AlphaOrLuminance = 0, // Traditional: uses alpha if present, else luminance threshold
+    ColorDistance = 1,    // Background keying: distance from background color > tolerance
+    ColorPalette = 2,     // Segment by dominant colors: select which colors form the foreground
+    EdgeGradient = 3      // Multi-channel Sobel gradient: contour lines at color boundaries
+};
+
 struct SvgImportOptions {
     int gid = -1;
     QByteArray svgData;
@@ -149,6 +156,12 @@ struct SvgImportOptions {
     bool invertBitmap = false;
     int minSpeckleArea = 4;
     double curveSmoothing = 0.75;
+
+    // Multicolored PNG additions (v0.5.2)
+    BitmapBinarizationMode binarizationMode = BitmapBinarizationMode::AlphaOrLuminance;
+    bool autoDetectBgColor = true;
+    QString customBgColor = QStringLiteral("#FFFFFF");
+    double colorTolerance = 0.15; // 0.01 .. 1.00 (15%)
 };
 
 struct IconPlacementTransform {

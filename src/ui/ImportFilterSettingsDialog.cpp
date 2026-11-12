@@ -114,13 +114,32 @@ ImportFilterSettingsDialog::ImportFilterSettingsDialog(const SvgImportOptions& i
     auto* tabBitmap = new QWidget(this);
     auto* formBitmap = new QFormLayout(tabBitmap);
 
+    m_binarizationCombo = new QComboBox(tabBitmap);
+    m_binarizationCombo->addItem(tr("Alpha / Luminance (Standard)"),
+                                 static_cast<int>(BitmapBinarizationMode::AlphaOrLuminance));
+    m_binarizationCombo->addItem(tr("Color Distance (Background Keying)"),
+                                 static_cast<int>(BitmapBinarizationMode::ColorDistance));
+    m_binarizationCombo->addItem(tr("Edge Gradient (Sobel Filter)"),
+                                 static_cast<int>(BitmapBinarizationMode::EdgeGradient));
+    formBitmap->addRow(tr("Binarization Mode:"), m_binarizationCombo);
+
+    m_autoDetectBgCheck = new QCheckBox(tr("Auto-detect background color from corners"), tabBitmap);
+    formBitmap->addRow(QString(), m_autoDetectBgCheck);
+
+    m_colorToleranceSpin = new QDoubleSpinBox(tabBitmap);
+    m_colorToleranceSpin->setRange(1.0, 100.0);
+    m_colorToleranceSpin->setSingleStep(1.0);
+    m_colorToleranceSpin->setDecimals(1);
+    m_colorToleranceSpin->setSuffix(QStringLiteral(" %"));
+    formBitmap->addRow(tr("Color Distance Tolerance:"), m_colorToleranceSpin);
+
     m_useAlphaCheck = new QCheckBox(tr("Use alpha transparency channel when available"), tabBitmap);
     formBitmap->addRow(QString(), m_useAlphaCheck);
 
     m_bitmapThresholdSpin = new QSpinBox(tabBitmap);
     m_bitmapThresholdSpin->setRange(1, 254);
     m_bitmapThresholdSpin->setValue(128);
-    formBitmap->addRow(tr("Alpha / Luminance Threshold (1..254):"), m_bitmapThresholdSpin);
+    formBitmap->addRow(tr("Alpha / Luminance / Edge Threshold (1..254):"), m_bitmapThresholdSpin);
 
     m_invertBitmapCheck = new QCheckBox(tr("Invert foreground and background"), tabBitmap);
     formBitmap->addRow(QString(), m_invertBitmapCheck);
@@ -186,6 +205,13 @@ void ImportFilterSettingsDialog::populateFromOptions(const SvgImportOptions& opt
     m_stripTinyPathsCheck->setChecked(opts.stripTinyPaths);
     m_minGeometryExtentSpin->setValue(opts.minGeometryExtent > 0.0 ? opts.minGeometryExtent : 1.0);
 
+    const int bModeIdx = m_binarizationCombo->findData(static_cast<int>(opts.binarizationMode));
+    if (bModeIdx >= 0) {
+        m_binarizationCombo->setCurrentIndex(bModeIdx);
+    }
+    m_autoDetectBgCheck->setChecked(opts.autoDetectBgColor);
+    m_colorToleranceSpin->setValue(opts.colorTolerance > 0.0 ? opts.colorTolerance * 100.0 : 15.0);
+
     m_useAlphaCheck->setChecked(opts.useAlpha);
     m_bitmapThresholdSpin->setValue(opts.bitmapThreshold > 0 ? opts.bitmapThreshold : 128);
     m_invertBitmapCheck->setChecked(opts.invertBitmap);
@@ -212,6 +238,11 @@ SvgImportOptions ImportFilterSettingsDialog::importOptions() const {
     opts.keepStrokes = m_keepStrokesCheck->isChecked();
     opts.stripTinyPaths = m_stripTinyPathsCheck->isChecked();
     opts.minGeometryExtent = m_minGeometryExtentSpin->value();
+
+    opts.binarizationMode = static_cast<BitmapBinarizationMode>(
+        m_binarizationCombo->currentData().toInt());
+    opts.autoDetectBgColor = m_autoDetectBgCheck->isChecked();
+    opts.colorTolerance = m_colorToleranceSpin->value() / 100.0;
 
     opts.useAlpha = m_useAlphaCheck->isChecked();
     opts.bitmapThreshold = m_bitmapThresholdSpin->value();

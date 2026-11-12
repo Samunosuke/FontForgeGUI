@@ -1477,11 +1477,17 @@ bool FontForgeBridge::batchImport(const BatchImportJob& job, BatchImportResult* 
 
         if (isPng) {
             BitmapTraceOptions traceOpts;
+            traceOpts.binarizationMode = importOpts.binarizationMode;
             traceOpts.useAlpha = importOpts.useAlpha;
             traceOpts.threshold = importOpts.bitmapThreshold;
             traceOpts.invert = importOpts.invertBitmap;
             traceOpts.minSpeckleArea = importOpts.minSpeckleArea;
             traceOpts.curveSmoothing = importOpts.curveSmoothing;
+            traceOpts.autoDetectBgColor = importOpts.autoDetectBgColor;
+            traceOpts.customBgColor = QColor(importOpts.customBgColor).isValid()
+                                          ? QColor(importOpts.customBgColor).rgb()
+                                          : 0xFFFFFFFF;
+            traceOpts.colorTolerance = importOpts.colorTolerance;
             BitmapTraceResult traceRes = BitmapTracer::traceFile(item.filePath, traceOpts);
             if (!traceRes.valid || traceRes.totalContours == 0) {
                 res.errors.append(QStringLiteral("Failed to trace PNG '%1': %2")

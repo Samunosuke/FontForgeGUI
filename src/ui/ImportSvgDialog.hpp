@@ -97,14 +97,34 @@ private:
 
     // PNG-only contour tracer group
     QGroupBox* m_pngTraceGroup = nullptr;
+    QComboBox* m_pngBinarizationCombo = nullptr;
+    QWidget* m_pngAlphaLumaWidget = nullptr;
     QCheckBox* m_pngUseAlphaCheck = nullptr;
+    QLabel* m_pngThresholdLabel = nullptr;
     QSlider* m_pngThresholdSlider = nullptr;
     QSpinBox* m_pngThresholdSpin = nullptr;
+
+    QWidget* m_pngColorDistanceWidget = nullptr;
+    QCheckBox* m_pngAutoDetectBgCheck = nullptr;
+    QPushButton* m_pngCustomBgColorBtn = nullptr;
+    QLabel* m_pngDetectedBgPreview = nullptr;
+    QSlider* m_pngColorToleranceSlider = nullptr;
+    QLabel* m_pngColorToleranceLabel = nullptr;
+
+    QWidget* m_pngPaletteWidget = nullptr;
+    QHBoxLayout* m_pngPaletteLayout = nullptr;
+    QVector<QPushButton*> m_pngPaletteButtons;
+    QVector<QRgb> m_selectedPaletteColors;
+    QRgb m_customBgColor = 0xFFFFFFFF;
+
     QCheckBox* m_pngInvertCheck = nullptr;
     QSpinBox* m_pngDespeckleSpin = nullptr;
     QDoubleSpinBox* m_pngSimplifySpin = nullptr;
     QSlider* m_pngSmoothingSlider = nullptr;
     QLabel* m_pngSmoothingValLabel = nullptr;
+
+    void updateBinarizationModeVisibility();
+    void updatePaletteButtons(const QVector<QRgb>& palette, QRgb bg);
 
     // Positioning & manual placement controls
     QComboBox* m_placementModeCombo = nullptr;

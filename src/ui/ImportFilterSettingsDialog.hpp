@@ -48,6 +48,9 @@ private:
     QDoubleSpinBox* m_minGeometryExtentSpin = nullptr;
 
     // Bitmap Tracer
+    QComboBox* m_binarizationCombo = nullptr;
+    QCheckBox* m_autoDetectBgCheck = nullptr;
+    QDoubleSpinBox* m_colorToleranceSpin = nullptr;
     QCheckBox* m_useAlphaCheck = nullptr;
     QSpinBox* m_bitmapThresholdSpin = nullptr;
     QCheckBox* m_invertBitmapCheck = nullptr;

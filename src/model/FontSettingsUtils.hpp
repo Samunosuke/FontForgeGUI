@@ -40,7 +40,38 @@ namespace ImportOptionKeys {
     inline constexpr QLatin1StringView InvertBitmap{"invertBitmap"};
     inline constexpr QLatin1StringView MinSpeckleArea{"minSpeckleArea"};
     inline constexpr QLatin1StringView CurveSmoothing{"curveSmoothing"};
+    inline constexpr QLatin1StringView BinarizationMode{"binarizationMode"};
+    inline constexpr QLatin1StringView AutoDetectBgColor{"autoDetectBgColor"};
+    inline constexpr QLatin1StringView CustomBgColor{"customBgColor"};
+    inline constexpr QLatin1StringView ColorTolerance{"colorTolerance"};
 } // namespace ImportOptionKeys
+
+inline BitmapBinarizationMode parseBinarizationMode(const QString& str) {
+    const QString s = str.toLower();
+    if (s == QStringLiteral("colordistance") || s == QStringLiteral("distance") || s == QStringLiteral("chromakey")) {
+        return BitmapBinarizationMode::ColorDistance;
+    }
+    if (s == QStringLiteral("colorpalette") || s == QStringLiteral("palette")) {
+        return BitmapBinarizationMode::ColorPalette;
+    }
+    if (s == QStringLiteral("edgegradient") || s == QStringLiteral("edge") || s == QStringLiteral("sobel")) {
+        return BitmapBinarizationMode::EdgeGradient;
+    }
+    return BitmapBinarizationMode::AlphaOrLuminance;
+}
+
+inline QString binarizationModeToString(BitmapBinarizationMode mode) {
+    switch (mode) {
+    case BitmapBinarizationMode::ColorDistance:
+        return QStringLiteral("ColorDistance");
+    case BitmapBinarizationMode::ColorPalette:
+        return QStringLiteral("ColorPalette");
+    case BitmapBinarizationMode::EdgeGradient:
+        return QStringLiteral("EdgeGradient");
+    default:
+        return QStringLiteral("AlphaOrLuminance");
+    }
+}
 
 inline GlyphPlacementMode parsePlacementMode(const QString& str) {
     const QString s = str.toLower();
@@ -142,6 +173,23 @@ inline SvgImportOptions importOptionsFromJson(const QJsonObject& obj,
     if (obj.contains(ImportOptionKeys::CurveSmoothing)) {
         opts.curveSmoothing = obj.value(ImportOptionKeys::CurveSmoothing).toDouble(opts.curveSmoothing);
     }
+    if (obj.contains(ImportOptionKeys::BinarizationMode)) {
+        const QJsonValue val = obj.value(ImportOptionKeys::BinarizationMode);
+        if (val.isString()) {
+            opts.binarizationMode = parseBinarizationMode(val.toString());
+        } else if (val.isDouble()) {
+            opts.binarizationMode = static_cast<BitmapBinarizationMode>(val.toInt(static_cast<int>(opts.binarizationMode)));
+        }
+    }
+    if (obj.contains(ImportOptionKeys::AutoDetectBgColor)) {
+        opts.autoDetectBgColor = obj.value(ImportOptionKeys::AutoDetectBgColor).toBool(opts.autoDetectBgColor);
+    }
+    if (obj.contains(ImportOptionKeys::CustomBgColor)) {
+        opts.customBgColor = obj.value(ImportOptionKeys::CustomBgColor).toString(opts.customBgColor);
+    }
+    if (obj.contains(ImportOptionKeys::ColorTolerance)) {
+        opts.colorTolerance = obj.value(ImportOptionKeys::ColorTolerance).toDouble(opts.colorTolerance);
+    }
     return opts;
 }
 
@@ -167,6 +215,10 @@ inline QJsonObject importOptionsToJson(const SvgImportOptions& opts) {
     obj.insert(ImportOptionKeys::InvertBitmap, opts.invertBitmap);
     obj.insert(ImportOptionKeys::MinSpeckleArea, opts.minSpeckleArea);
     obj.insert(ImportOptionKeys::CurveSmoothing, opts.curveSmoothing);
+    obj.insert(ImportOptionKeys::BinarizationMode, binarizationModeToString(opts.binarizationMode));
+    obj.insert(ImportOptionKeys::AutoDetectBgColor, opts.autoDetectBgColor);
+    obj.insert(ImportOptionKeys::CustomBgColor, opts.customBgColor);
+    obj.insert(ImportOptionKeys::ColorTolerance, opts.colorTolerance);
     return obj;
 }
 

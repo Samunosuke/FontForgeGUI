@@ -1,5 +1,6 @@
 #include "backend/FontForgeBridge.hpp"
 #include "model/BatchImportDefinition.hpp"
+#include "model/BitmapTracer.hpp"
 #include "model/FontSettingsUtils.hpp"
 #include "model/UnicodeRangeFilter.hpp"
 
@@ -184,6 +185,69 @@ int main(int argc, char* argv[]) {
     CHECK(std::abs(loadedDefaults.scaleFactor - 1.35) < 1e-4);
     CHECK(loadedDefaults.bitmapThreshold == 185);
     CHECK(loadedDefaults.normalizeToBlackFill == false);
+    resetDefaultImportOptions();
+
+    // -------------------------------------------------------------------------
+    // 6. Multicolored PNG Tracing & Color Distance (v0.5.2)
+    // -------------------------------------------------------------------------
+    // Test 6a: Create an opaque white image with a bright yellow square in the center.
+    // In Luminance mode, yellow luma = ~226 which is > 128 threshold, so it would fail/invert.
+    // In ColorDistance mode, distance from white = ~0.60 > 0.15, so it is detected as foreground!
+    QImage yellowOnWhite(64, 64, QImage::Format_RGB32);
+    yellowOnWhite.fill(qRgb(255, 255, 255));
+    {
+        QPainter p(&yellowOnWhite);
+        p.fillRect(16, 16, 32, 32, QColor(255, 255, 0));
+    }
+    const QRgb detectedBg = BitmapTracer::detectBackgroundColor(yellowOnWhite);
+    CHECK(qRed(detectedBg) == 255 && qGreen(detectedBg) == 255 && qBlue(detectedBg) == 255);
+
+    BitmapTraceOptions colorDistOpts;
+    colorDistOpts.binarizationMode = BitmapBinarizationMode::ColorDistance;
+    colorDistOpts.autoDetectBgColor = true;
+    colorDistOpts.colorTolerance = 0.15;
+    const BitmapTraceResult yellowTrace = BitmapTracer::trace(yellowOnWhite, colorDistOpts);
+    CHECK(yellowTrace.valid);
+    CHECK(yellowTrace.totalContours >= 1);
+    CHECK(yellowTrace.inkBounds.width() > 20.0);
+
+    // Test 6b: Extract palette from multicolored image
+    QImage multiColor(64, 64, QImage::Format_RGB32);
+    multiColor.fill(qRgb(255, 255, 255));
+    {
+        QPainter p(&multiColor);
+        p.fillRect(0, 0, 32, 32, QColor(255, 0, 0));
+        p.fillRect(32, 0, 32, 32, QColor(0, 255, 0));
+        p.fillRect(0, 32, 32, 32, QColor(0, 0, 255));
+    }
+    const QVector<QRgb> pal = BitmapTracer::extractPalette(multiColor, 8);
+    CHECK(pal.size() >= 4); // White, Red, Green, Blue
+
+    // Test 6c: Trace a real-world sample icon from sample_icons if present
+    const QString sampleIconPath = QStringLiteral("src/sample_icons/appointment-new.png");
+    if (QFileInfo::exists(sampleIconPath)) {
+        BitmapTraceOptions sampleOpts;
+        sampleOpts.binarizationMode = BitmapBinarizationMode::ColorDistance;
+        sampleOpts.autoDetectBgColor = true;
+        sampleOpts.colorTolerance = 0.15;
+        const BitmapTraceResult sampleRes = BitmapTracer::traceFile(sampleIconPath, sampleOpts);
+        CHECK(sampleRes.valid);
+        CHECK(sampleRes.totalContours > 0);
+    }
+
+    // Test 6d: Persistence of v0.5.2 options
+    SvgImportOptions v052Options;
+    v052Options.binarizationMode = BitmapBinarizationMode::ColorDistance;
+    v052Options.autoDetectBgColor = false;
+    v052Options.customBgColor = QStringLiteral("#123456");
+    v052Options.colorTolerance = 0.28;
+    saveDefaultImportOptions(v052Options);
+
+    SvgImportOptions loadedV052 = loadDefaultImportOptions();
+    CHECK(loadedV052.binarizationMode == BitmapBinarizationMode::ColorDistance);
+    CHECK(loadedV052.autoDetectBgColor == false);
+    CHECK(loadedV052.customBgColor == QStringLiteral("#123456"));
+    CHECK(std::abs(loadedV052.colorTolerance - 0.28) < 1e-4);
     resetDefaultImportOptions();
 
     bridge.closeFont();

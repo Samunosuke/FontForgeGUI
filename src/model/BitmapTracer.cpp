@@ -1,5 +1,6 @@
 #include "model/BitmapTracer.hpp"
 
+#include <QColor>
 #include <QPainter>
 #include <QPointF>
 #include <QSvgRenderer>
@@ -8,7 +9,9 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <numeric>
 #include <queue>
+#include <unordered_map>
 #include <vector>
 
 namespace ffgui {
@@ -349,6 +352,127 @@ QByteArray wrapSvgPathDocument(int width, int height, const QString& pathData, b
 
 } // namespace
 
+double BitmapTracer::perceptualColorDistance(QRgb c1, QRgb c2) {
+    const double dr = static_cast<double>(qRed(c1) - qRed(c2));
+    const double dg = static_cast<double>(qGreen(c1) - qGreen(c2));
+    const double db = static_cast<double>(qBlue(c1) - qBlue(c2));
+    const double distSq = 2.0 * dr * dr + 4.0 * dg * dg + 3.0 * db * db;
+    // Maximum possible distance: 2*255^2 + 4*255^2 + 3*255^2 = 585225.0
+    return std::sqrt(distSq / 585225.0);
+}
+
+QRgb BitmapTracer::detectBackgroundColor(const QImage& image) {
+    if (image.isNull() || image.width() <= 0 || image.height() <= 0) {
+        return 0xFFFFFFFF;
+    }
+
+    const int w = image.width();
+    const int h = image.height();
+
+    std::unordered_map<uint16_t, int> freq;
+    std::unordered_map<uint16_t, QRgb> representative;
+
+    auto sample = [&](int x, int y) {
+        const QRgb px = image.pixel(x, y);
+        if (qAlpha(px) < 16) {
+            return;
+        }
+        const uint16_t key = static_cast<uint16_t>(
+            ((qRed(px) >> 3) << 10) | ((qGreen(px) >> 3) << 5) | (qBlue(px) >> 3));
+        freq[key]++;
+        if (!representative.count(key)) {
+            representative[key] = px;
+        }
+    };
+
+    for (int x = 0; x < w; ++x) {
+        sample(x, 0);
+        sample(x, h - 1);
+    }
+    for (int y = 1; y < h - 1; ++y) {
+        sample(0, y);
+        sample(w - 1, y);
+    }
+
+    if (freq.empty()) {
+        return 0xFFFFFFFF;
+    }
+
+    uint16_t bestKey = 0;
+    int maxCount = -1;
+    for (const auto& [k, count] : freq) {
+        if (count > maxCount) {
+            maxCount = count;
+            bestKey = k;
+        }
+    }
+    return representative[bestKey];
+}
+
+QVector<QRgb> BitmapTracer::extractPalette(const QImage& image, int maxColors) {
+    if (image.isNull() || image.width() <= 0 || image.height() <= 0) {
+        return {};
+    }
+
+    constexpr int kThumbDim = 128;
+    QImage thumb = image;
+    if (thumb.width() > kThumbDim || thumb.height() > kThumbDim) {
+        thumb = thumb.scaled(kThumbDim, kThumbDim, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+    }
+
+    QImage indexed = thumb.convertToFormat(QImage::Format_Indexed8, Qt::AvoidDither);
+    const QList<QRgb> table = indexed.colorTable();
+    if (table.isEmpty()) {
+        return {};
+    }
+
+    std::vector<int> counts(table.size(), 0);
+    const int w = indexed.width();
+    const int h = indexed.height();
+    for (int y = 0; y < h; ++y) {
+        const uchar* scan = indexed.constScanLine(y);
+        for (int x = 0; x < w; ++x) {
+            const int idx = scan[x];
+            if (idx >= 0 && idx < static_cast<int>(counts.size())) {
+                counts[idx]++;
+            }
+        }
+    }
+
+    std::vector<int> indices(table.size());
+    std::iota(indices.begin(), indices.end(), 0);
+    std::sort(indices.begin(), indices.end(), [&](int a, int b) {
+        return counts[a] > counts[b];
+    });
+
+    QVector<QRgb> palette;
+    palette.reserve(maxColors);
+    for (int idx : indices) {
+        if (counts[idx] <= 0) {
+            continue;
+        }
+        const QRgb color = table[idx];
+        if (qAlpha(color) < 16) {
+            continue;
+        }
+
+        bool duplicate = false;
+        for (QRgb existing : palette) {
+            if (perceptualColorDistance(color, existing) < 0.08) {
+                duplicate = true;
+                break;
+            }
+        }
+        if (!duplicate) {
+            palette.append(color);
+            if (palette.size() >= maxColors) {
+                break;
+            }
+        }
+    }
+    return palette;
+}
+
 BitmapTraceResult BitmapTracer::trace(const QImage& image, const BitmapTraceOptions& options) {
     BitmapTraceResult result;
     if (image.isNull() || image.width() <= 0 || image.height() <= 0) {
@@ -373,6 +497,12 @@ BitmapTraceResult BitmapTracer::trace(const QImage& image, const BitmapTraceOpti
     const int w = workImg.width();
     const int h = workImg.height();
 
+    // Detect background color and dominant color palette
+    result.detectedBgColor = options.autoDetectBgColor
+                                 ? detectBackgroundColor(workImg)
+                                 : options.customBgColor;
+    result.extractedPalette = extractPalette(workImg, 8);
+
     // Detect whether the image actually uses alpha transparency
     int minAlpha = 255;
     int maxAlpha = 0;
@@ -392,27 +522,125 @@ BitmapTraceResult BitmapTracer::trace(const QImage& image, const BitmapTraceOpti
     const int thresh = std::clamp(options.threshold, 1, 254);
     std::vector<uint8_t> grid(static_cast<size_t>(w * h), 0);
 
-    for (int y = 0; y < h; ++y) {
-        const QRgb* scan = reinterpret_cast<const QRgb*>(workImg.constScanLine(y));
-        for (int x = 0; x < w; ++x) {
-            const QRgb px = scan[x];
-            const int a = qAlpha(px);
-            bool fg = false;
-            if (useAlpha) {
-                fg = (a >= thresh);
-            } else {
-                // Composite over white before computing luminance so semi-transparent edges behave
-                // predictably even in luminance mode.
-                const int r = (qRed(px) * a + 255 * (255 - a)) / 255;
-                const int g = (qGreen(px) * a + 255 * (255 - a)) / 255;
-                const int b = (qBlue(px) * a + 255 * (255 - a)) / 255;
-                const int luma = (77 * r + 150 * g + 29 * b) >> 8;
-                fg = (luma < thresh);
+    const BitmapBinarizationMode mode = options.binarizationMode;
+    const QRgb bgCol = result.detectedBgColor;
+    const double colTol = std::clamp(options.colorTolerance, 0.01, 1.0);
+
+    if (mode == BitmapBinarizationMode::EdgeGradient) {
+        // Multi-channel Sobel Edge Detection
+        const double edgeThresh = static_cast<double>(thresh);
+        for (int y = 1; y < h - 1; ++y) {
+            const QRgb* prevRow = reinterpret_cast<const QRgb*>(workImg.constScanLine(y - 1));
+            const QRgb* currRow = reinterpret_cast<const QRgb*>(workImg.constScanLine(y));
+            const QRgb* nextRow = reinterpret_cast<const QRgb*>(workImg.constScanLine(y + 1));
+            for (int x = 1; x < w - 1; ++x) {
+                const int rx = (qRed(prevRow[x + 1]) + 2 * qRed(currRow[x + 1]) + qRed(nextRow[x + 1])) -
+                               (qRed(prevRow[x - 1]) + 2 * qRed(currRow[x - 1]) + qRed(nextRow[x - 1]));
+                const int ry = (qRed(nextRow[x - 1]) + 2 * qRed(nextRow[x]) + qRed(nextRow[x + 1])) -
+                               (qRed(prevRow[x - 1]) + 2 * qRed(prevRow[x]) + qRed(prevRow[x + 1]));
+
+                const int gx = (qGreen(prevRow[x + 1]) + 2 * qGreen(currRow[x + 1]) + qGreen(nextRow[x + 1])) -
+                               (qGreen(prevRow[x - 1]) + 2 * qGreen(currRow[x - 1]) + qGreen(nextRow[x - 1]));
+                const int gy = (qGreen(nextRow[x - 1]) + 2 * qGreen(nextRow[x]) + qGreen(nextRow[x + 1])) -
+                               (qGreen(prevRow[x - 1]) + 2 * qGreen(prevRow[x]) + qGreen(prevRow[x + 1]));
+
+                const int bx = (qBlue(prevRow[x + 1]) + 2 * qBlue(currRow[x + 1]) + qBlue(nextRow[x + 1])) -
+                               (qBlue(prevRow[x - 1]) + 2 * qBlue(currRow[x - 1]) + qBlue(nextRow[x - 1]));
+                const int by = (qBlue(nextRow[x - 1]) + 2 * qBlue(nextRow[x]) + qBlue(nextRow[x + 1])) -
+                               (qBlue(prevRow[x - 1]) + 2 * qBlue(prevRow[x]) + qBlue(prevRow[x + 1]));
+
+                const double gMag = std::sqrt(static_cast<double>(rx * rx + ry * ry + gx * gx + gy * gy + bx * bx + by * by) / 3.0) / 4.0;
+                bool fg = (gMag >= edgeThresh * 0.5);
+                if (options.invert) {
+                    fg = !fg;
+                }
+                grid[y * w + x] = fg ? 1 : 0;
             }
-            if (options.invert) {
-                fg = !fg;
+        }
+    } else if (mode == BitmapBinarizationMode::ColorDistance) {
+        // Perceptual distance to background color
+        for (int y = 0; y < h; ++y) {
+            const QRgb* scan = reinterpret_cast<const QRgb*>(workImg.constScanLine(y));
+            for (int x = 0; x < w; ++x) {
+                const QRgb px = scan[x];
+                const int a = qAlpha(px);
+                if (a < 10) {
+                    grid[y * w + x] = options.invert ? 1 : 0;
+                    continue;
+                }
+                const int r = (qRed(px) * a + qRed(bgCol) * (255 - a)) / 255;
+                const int g = (qGreen(px) * a + qGreen(bgCol) * (255 - a)) / 255;
+                const int b = (qBlue(px) * a + qBlue(bgCol) * (255 - a)) / 255;
+                const QRgb compPx = qRgb(r, g, b);
+
+                const double dist = perceptualColorDistance(compPx, bgCol);
+                bool fg = (dist >= colTol);
+                if (options.invert) {
+                    fg = !fg;
+                }
+                grid[y * w + x] = fg ? 1 : 0;
             }
-            grid[y * w + x] = fg ? 1 : 0;
+        }
+    } else if (mode == BitmapBinarizationMode::ColorPalette) {
+        // Segment by dominant colors
+        QVector<QRgb> targetColors = options.selectedPaletteColors;
+        if (targetColors.isEmpty()) {
+            for (QRgb c : result.extractedPalette) {
+                if (perceptualColorDistance(c, bgCol) >= colTol) {
+                    targetColors.append(c);
+                }
+            }
+        }
+
+        for (int y = 0; y < h; ++y) {
+            const QRgb* scan = reinterpret_cast<const QRgb*>(workImg.constScanLine(y));
+            for (int x = 0; x < w; ++x) {
+                const QRgb px = scan[x];
+                const int a = qAlpha(px);
+                if (a < 10) {
+                    grid[y * w + x] = options.invert ? 1 : 0;
+                    continue;
+                }
+                const int r = (qRed(px) * a + qRed(bgCol) * (255 - a)) / 255;
+                const int g = (qGreen(px) * a + qGreen(bgCol) * (255 - a)) / 255;
+                const int b = (qBlue(px) * a + qBlue(bgCol) * (255 - a)) / 255;
+                const QRgb compPx = qRgb(r, g, b);
+
+                bool fg = false;
+                for (QRgb target : targetColors) {
+                    if (perceptualColorDistance(compPx, target) <= colTol) {
+                        fg = true;
+                        break;
+                    }
+                }
+                if (options.invert) {
+                    fg = !fg;
+                }
+                grid[y * w + x] = fg ? 1 : 0;
+            }
+        }
+    } else {
+        // Standard Alpha / Luminance mode
+        for (int y = 0; y < h; ++y) {
+            const QRgb* scan = reinterpret_cast<const QRgb*>(workImg.constScanLine(y));
+            for (int x = 0; x < w; ++x) {
+                const QRgb px = scan[x];
+                const int a = qAlpha(px);
+                bool fg = false;
+                if (useAlpha) {
+                    fg = (a >= thresh);
+                } else {
+                    const int r = (qRed(px) * a + 255 * (255 - a)) / 255;
+                    const int g = (qGreen(px) * a + 255 * (255 - a)) / 255;
+                    const int b = (qBlue(px) * a + 255 * (255 - a)) / 255;
+                    const int luma = (77 * r + 150 * g + 29 * b) >> 8;
+                    fg = (luma < thresh);
+                }
+                if (options.invert) {
+                    fg = !fg;
+                }
+                grid[y * w + x] = fg ? 1 : 0;
+            }
         }
     }
 
