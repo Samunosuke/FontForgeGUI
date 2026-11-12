@@ -39,6 +39,10 @@ extern "C" {
 #include "ustring.h"
 }
 
+#ifdef vsnprintf
+#undef vsnprintf
+#endif
+
 namespace ffgui {
 
 namespace {
