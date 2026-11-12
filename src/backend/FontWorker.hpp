@@ -32,6 +32,9 @@ public slots:
     void validateFont(bool force);
     void importSvgToGlyph(const SvgImportOptions& options);
     void batchImport(const ffgui::BatchImportJob& job);
+    void mergeFont(const ffgui::FontMergeOptions& options);
+    void pasteGlyphs(const QVector<ffgui::GlyphSummary>& glyphs, int32_t targetStartUnicode,
+                     bool overwriteExisting);
     void closeFont();
 
 signals:
@@ -53,6 +56,10 @@ signals:
     void svgImportFailed(const QString& error);
     void batchImportCompleted(const ffgui::BatchImportResult& result);
     void batchImportFailed(const QString& error);
+    void fontMerged(const ffgui::FontMergeResult& result);
+    void fontMergeFailed(const QString& error);
+    void glyphsPasted(const ffgui::FontMergeResult& result);
+    void glyphsPasteFailed(const QString& error);
     void fontClosed();
     void logMessage(const QString& level, const QString& message);
     void progressUpdated(int current, int total, const QString& status);

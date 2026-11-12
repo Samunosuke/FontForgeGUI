@@ -9,6 +9,8 @@ namespace ffgui {
 
 QString formatCodePoint(int32_t cp);
 bool parseSingleCodePoint(QString text, int32_t* outCp);
+bool parseCodePointRange(const QString& text, QList<QPair<int32_t, int32_t>>* outRanges, QString* outError = nullptr);
+bool isCodePointInRanges(int32_t cp, const QList<QPair<int32_t, int32_t>>& ranges);
 bool parseAltUnicodesList(const QString& text, QList<int32_t>* outAlts, QString* outError);
 bool validateGlyphName(const QString& name, QString* outError, bool allowEmpty = false);
 QString suggestedGlyphName(int32_t unicode);

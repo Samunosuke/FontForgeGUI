@@ -52,6 +52,9 @@ private slots:
     void onMoveGlyphsClicked();
     void onImportSvgClicked();
     void onBatchImportClicked();
+    void onImportFontClicked();
+    void onCopyGlyphsClicked();
+    void onPasteGlyphsClicked();
 
     void onFontLoaded(const ffgui::FontDocumentSnapshot& snapshot);
     void onFontLoadFailed(const QString& error);
@@ -61,6 +64,10 @@ private slots:
     void onGlyphCreationFailed(const QString& error);
     void onGlyphsMoved(const ffgui::MoveGlyphsResult& result);
     void onGlyphsMoveFailed(const QString& error);
+    void onFontMerged(const ffgui::FontMergeResult& result);
+    void onFontMergeFailed(const QString& error);
+    void onGlyphsPasted(const ffgui::FontMergeResult& result);
+    void onGlyphsPasteFailed(const QString& error);
     void onGlyphMetadataUpdated(const ffgui::GlyphSummary& glyph);
     void onGlyphMetadataUpdateFailed(const QString& error);
     void onFontMetadataUpdated(const ffgui::FontSummary& summary);
@@ -122,6 +129,9 @@ private:
     QAction* m_moveGlyphsAction = nullptr;
     QAction* m_importSvgAction = nullptr;
     QAction* m_batchImportAction = nullptr;
+    QAction* m_importFontAction = nullptr;
+    QAction* m_copyGlyphsAction = nullptr;
+    QAction* m_pasteGlyphsAction = nullptr;
 
     QComboBox* m_areaCombo = nullptr;
     QLineEdit* m_rangeEdit = nullptr;

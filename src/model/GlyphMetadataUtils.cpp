@@ -37,6 +37,71 @@ bool parseSingleCodePoint(QString text, int32_t* outCp) {
     return true;
 }
 
+bool parseCodePointRange(const QString& text, QList<QPair<int32_t, int32_t>>* outRanges, QString* outError) {
+    if (!outRanges) {
+        return false;
+    }
+    outRanges->clear();
+    const QString trimmed = text.trimmed();
+    if (trimmed.isEmpty() || trimmed.compare(QStringLiteral("all"), Qt::CaseInsensitive) == 0
+        || trimmed == QStringLiteral("*")) {
+        outRanges->append({0, 0x10FFFF});
+        return true;
+    }
+
+    static const QRegularExpression kSepRe(QStringLiteral("[,;\\s]+"));
+    const QStringList tokens = trimmed.split(kSepRe, Qt::SkipEmptyParts);
+    for (const QString& tok : tokens) {
+        if (tok.compare(QStringLiteral("all"), Qt::CaseInsensitive) == 0 || tok == QStringLiteral("*")) {
+            outRanges->append({0, 0x10FFFF});
+            continue;
+        }
+
+        int dashIdx = tok.indexOf(QLatin1Char('-'));
+        if (dashIdx <= 0) {
+            dashIdx = tok.indexOf(QStringLiteral(".."));
+        }
+
+        if (dashIdx > 0) {
+            const QString part1 = tok.left(dashIdx);
+            const QString part2 = tok.mid(dashIdx + (tok.contains(QStringLiteral("..")) ? 2 : 1));
+            int32_t startCp = -1;
+            int32_t endCp = -1;
+            if (!parseSingleCodePoint(part1, &startCp) || startCp < 0 ||
+                !parseSingleCodePoint(part2, &endCp) || endCp < 0 || startCp > endCp) {
+                if (outError) {
+                    *outError = QCoreApplication::translate("GlyphMetadataUtils", "Invalid range '%1'").arg(tok);
+                }
+                return false;
+            }
+            outRanges->append({startCp, endCp});
+        } else {
+            int32_t singleCp = -1;
+            if (!parseSingleCodePoint(tok, &singleCp) || singleCp < 0) {
+                if (outError) {
+                    *outError = QCoreApplication::translate("GlyphMetadataUtils", "Invalid code point '%1'").arg(tok);
+                }
+                return false;
+            }
+            outRanges->append({singleCp, singleCp});
+        }
+    }
+
+    return !outRanges->isEmpty();
+}
+
+bool isCodePointInRanges(int32_t cp, const QList<QPair<int32_t, int32_t>>& ranges) {
+    if (ranges.isEmpty()) {
+        return true;
+    }
+    for (const auto& r : ranges) {
+        if (cp >= r.first && cp <= r.second) {
+            return true;
+        }
+    }
+    return false;
+}
+
 bool parseAltUnicodesList(const QString& text, QList<int32_t>* outAlts, QString* outError) {
     QList<int32_t> alts;
     const QString trimmed = text.trimmed();

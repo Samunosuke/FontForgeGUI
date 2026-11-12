@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(FontForgeGUI VERSION 0.5.2 LANGUAGES C CXX)
+project(FontForgeGUI VERSION 0.5.3 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -58,6 +58,7 @@ add_library(ffgui_core STATIC
     model/BatchImportDefinition.hpp
     model/BatchImportDefinition.cpp
     model/FontSettingsUtils.hpp
+    model/GlyphClipboardUtils.hpp
 )
 
 target_include_directories(ffgui_core
@@ -105,6 +106,8 @@ add_executable(FontForgeGUI WIN32
     ui/BatchImportDialog.cpp
     ui/ImportFilterSettingsDialog.hpp
     ui/ImportFilterSettingsDialog.cpp
+    ui/ImportFontDialog.hpp
+    ui/ImportFontDialog.cpp
 )
 
 target_link_libraries(FontForgeGUI

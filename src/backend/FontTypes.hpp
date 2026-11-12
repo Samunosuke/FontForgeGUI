@@ -50,6 +50,7 @@ struct GlyphSummary {
     QPainterPath outline; // In font coordinates (Y-up), fillRule = Qt::WindingFill
     QRectF bounds;
     bool hasOutline = false;
+    QByteArray svgData;
 };
 
 struct FontDocumentSnapshot {
@@ -311,6 +312,23 @@ struct BatchImportResult {
     QStringList errors;
     FontSummary updatedFontSummary;
     QVector<GlyphSummary> updatedGlyphs;
+    FontDocumentSnapshot snapshot;
+};
+
+struct FontMergeOptions {
+    QString sourceFontPath;
+    QString sourceRange = QStringLiteral("all"); // e.g. "U+E000-U+E0FF", "0x20-0x7E", or "all"
+    int32_t targetStartUnicode = -1;             // -1 = preserve source codepoints
+    bool scaleToEm = true;                       // Scale outlines to target font EM size
+    bool copyMetrics = true;                     // Copy and scale advance width
+    bool overwriteExisting = false;              // Overwrite target codepoints if already occupied
+};
+
+struct FontMergeResult {
+    bool success = false;
+    int importedCount = 0;
+    int skippedCount = 0;
+    QStringList errors;
     FontDocumentSnapshot snapshot;
 };
 

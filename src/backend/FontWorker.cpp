@@ -123,6 +123,27 @@ void FontWorker::batchImport(const ffgui::BatchImportJob& job) {
     }
 }
 
+void FontWorker::mergeFont(const ffgui::FontMergeOptions& options) {
+    FontMergeResult result;
+    QString error;
+    if (m_bridge->mergeFont(options, &result, &error)) {
+        emit fontMerged(result);
+    } else {
+        emit fontMergeFailed(error);
+    }
+}
+
+void FontWorker::pasteGlyphs(const QVector<ffgui::GlyphSummary>& glyphs, int32_t targetStartUnicode,
+                             bool overwriteExisting) {
+    FontMergeResult result;
+    QString error;
+    if (m_bridge->pasteGlyphs(glyphs, targetStartUnicode, overwriteExisting, &result, &error)) {
+        emit glyphsPasted(result);
+    } else {
+        emit glyphsPasteFailed(error);
+    }
+}
+
 void FontWorker::closeFont() {
     m_bridge->closeFont();
     emit fontClosed();

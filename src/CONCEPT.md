@@ -101,15 +101,20 @@ The UI is designed to be simple and easy to use.
     - Multi-channel color gradient / edge detection (Sobel filter for color boundaries)
     - Integration into `BitmapTracer`, `ImportSvgDialog`, `ImportFilterSettingsDialog`, and batch import
 
-#### v0.5.3
-- [ ] Glyph(es) import from other font 
-    - copy and paste from second FontForgeGUI instance 
-    - command line options with code point range source and target font)
+#### v0.5.3 (Implemented)
+- [x] Glyph(es) import from other font 
+    - copy and paste from second FontForgeGUI instance (and clipboard interoperability with vector apps via SVG and JSON)
+    - interactive GUI dialog (`File -> Import Glyphs from Font...`) with debounced collision analysis, range selection, EM scaling, and advance width copying
+    - command line options (`--merge-font`, `--source-range`, `--target-start`, `--no-scale-to-em`, `--no-copy-metrics`, `--overwrite`) with comprehensive English reference in `CLI.md`
+
+### v0.5.4
+- [ ] Icons in menu bar (based on font or SVG ?)
+- [ ] Layout improvemements in Toolbar / Menu bar (corectly layout them in raster or grid )
 
 #### v0.6
 - [ ] Edit Glyph outline and vectors (simple and easy to use graphical editor)
 
-### Zukünftige Ideen & Erweiterungen
-- **AI-basierter Importfilter / Vektorisierung**:
-  - Lokales KI-Modell (z. B. via ONNX-Runtime / DirectML oder CLI-Sidecar wie `rembg` / BiRefNet / SAM) zur intelligenten Freistellung komplexer Motive, Schattenentfernung und KI-gestützten Vektorisierung.
+### Future ideas & improvements
+- **AI-based Importfilter / Vectorizer**:
+  - Local AI-model (z. B. via ONNX-Runtime / DirectML oder CLI-Sidecar wie `rembg` / BiRefNet / SAM) zur intelligenten Freistellung komplexer Motive, Schattenentfernung und KI-gestützten Vektorisierung.
 

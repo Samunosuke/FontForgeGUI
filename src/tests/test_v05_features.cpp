@@ -2,6 +2,8 @@
 #include "model/BatchImportDefinition.hpp"
 #include "model/BitmapTracer.hpp"
 #include "model/FontSettingsUtils.hpp"
+#include "model/GlyphClipboardUtils.hpp"
+#include "model/GlyphMetadataUtils.hpp"
 #include "model/UnicodeRangeFilter.hpp"
 
 #include <QDir>
@@ -249,6 +251,97 @@ int main(int argc, char* argv[]) {
     CHECK(loadedV052.customBgColor == QStringLiteral("#123456"));
     CHECK(std::abs(loadedV052.colorTolerance - 0.28) < 1e-4);
     resetDefaultImportOptions();
+
+    // -------------------------------------------------------------------------
+    // 7. Milestone v0.5.3: Font Merging, Collision Detection, & Clipboard
+    // -------------------------------------------------------------------------
+    // 7a: Range Parsing
+    QList<QPair<int32_t, int32_t>> ranges;
+    QString rangeErr;
+    CHECK(parseCodePointRange(QStringLiteral("U+E000-U+E002, 0xF005, 100-102"), &ranges, &rangeErr));
+    CHECK(rangeErr.isEmpty());
+    CHECK(ranges.size() == 3);
+    CHECK(isCodePointInRanges(0xE001, ranges));
+    CHECK(isCodePointInRanges(0xF005, ranges));
+    CHECK(isCodePointInRanges(0x100, ranges));
+    CHECK(!isCodePointInRanges(0xE003, ranges));
+    CHECK(!isCodePointInRanges(0x099, ranges));
+
+    // 7b: Save current font (1000 EM) to disk as source
+    const QString srcSfdPath = QDir(tempDir.path()).filePath(QStringLiteral("source_font.sfd"));
+    ExportOptions expSrc;
+    expSrc.outputPath = srcSfdPath;
+    CHECK(bridge.exportFont(expSrc, &err));
+    CHECK(QFileInfo::exists(srcSfdPath));
+
+    // 7c: Create a 2048 EM target font
+    bridge.closeFont();
+    NewFontOptions targetFontOpts;
+    targetFontOpts.fontName = QStringLiteral("TargetFont2048");
+    targetFontOpts.familyName = QStringLiteral("TargetFont2048");
+    targetFontOpts.ascent = 1638;
+    targetFontOpts.descent = 410; // 1638 + 410 = 2048 EM
+    FontDocumentSnapshot targetSnap;
+    CHECK(bridge.createNewFont(targetFontOpts, &targetSnap, &err));
+    CHECK(targetSnap.summary.emSize == 2048);
+
+    // 7d: Merge glyphs from source_font.sfd into TargetFont2048
+    FontMergeOptions mergeOpts;
+    mergeOpts.sourceFontPath = srcSfdPath;
+    mergeOpts.sourceRange = QStringLiteral("all");
+    mergeOpts.targetStartUnicode = 0xE100;
+    mergeOpts.scaleToEm = true;
+    mergeOpts.copyMetrics = true;
+    mergeOpts.overwriteExisting = false;
+
+    FontMergeResult mergeRes;
+    CHECK(bridge.mergeFont(mergeOpts, &mergeRes, &err));
+    CHECK(mergeRes.success);
+    CHECK(mergeRes.importedCount == 3);
+    CHECK(mergeRes.snapshot.glyphs.size() >= 3);
+
+    // Check target code points and proportional EM scaling
+    bool foundE100 = false;
+    for (const auto& g : mergeRes.snapshot.glyphs) {
+        if (g.unicode == 0xE100) {
+            foundE100 = true;
+            // Original width 1000 scaled to 2048 EM -> ~2048
+            CHECK(g.width > 1500);
+        }
+    }
+    CHECK(foundE100);
+
+    // 7e: Collision detection without overwrite
+    FontMergeResult collideRes;
+    QString collideErr;
+    bool colResult = bridge.mergeFont(mergeOpts, &collideRes, &collideErr);
+    CHECK(!colResult);
+    CHECK(!collideErr.isEmpty());
+
+    // 7f: Collision resolution with overwriteExisting = true
+    mergeOpts.overwriteExisting = true;
+    FontMergeResult overwriteRes;
+    QString overwriteErr;
+    CHECK(bridge.mergeFont(mergeOpts, &overwriteRes, &overwriteErr));
+    CHECK(overwriteRes.success);
+    CHECK(overwriteRes.importedCount == 3);
+
+    // 7g: Clipboard serialization and deserialization roundtrip
+    QMimeData* clipMime = serializeGlyphsToMimeData(mergeRes.snapshot.glyphs, 1638, 410);
+    CHECK(clipMime != nullptr);
+    CHECK(canPasteGlyphs(clipMime));
+
+    const QVector<GlyphSummary> deserialized = deserializeGlyphsFromMimeData(clipMime);
+    CHECK(deserialized.size() == mergeRes.snapshot.glyphs.size());
+    bool foundDeserializedE100 = false;
+    for (const auto& g : deserialized) {
+        if (g.unicode == 0xE100) {
+            foundDeserializedE100 = true;
+            CHECK(!g.svgData.isEmpty());
+        }
+    }
+    CHECK(foundDeserializedE100);
+    delete clipMime;
 
     bridge.closeFont();
     return 0;

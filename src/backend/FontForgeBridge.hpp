@@ -45,6 +45,10 @@ public:
                           QString* outError);
     bool batchImport(const BatchImportJob& job, BatchImportResult* outResult,
                      QString* outError);
+    bool mergeFont(const FontMergeOptions& options, FontMergeResult* outResult,
+                   QString* outError);
+    bool pasteGlyphs(const QVector<GlyphSummary>& glyphs, int32_t targetStartUnicode,
+                     bool overwriteExisting, FontMergeResult* outResult, QString* outError);
     void closeFont();
 
     bool hasOpenFont() const;

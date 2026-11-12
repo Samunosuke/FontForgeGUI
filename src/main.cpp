@@ -47,7 +47,7 @@ int main(int argc, char* argv[]) {
     QApplication app(argc, argv);
     app.setOrganizationName(QStringLiteral("FontForgeGUI"));
     app.setApplicationName(QStringLiteral("FontForgeGUI"));
-    app.setApplicationVersion(QStringLiteral("0.5.2"));
+    app.setApplicationVersion(QStringLiteral("0.5.3"));
 
     QCommandLineParser parser;
     parser.setApplicationDescription(QStringLiteral("Modern Qt 6 GUI and CLI tool for FontForge"));
@@ -69,6 +69,19 @@ int main(int argc, char* argv[]) {
     QCommandLineOption importDefOpt({QStringLiteral("d"), QStringLiteral("import-def")},
                                     QStringLiteral("JSON file containing batch import definitions (glyphs, unicodes, options)."),
                                     QStringLiteral("file.json"));
+    QCommandLineOption mergeFontOpt(QStringLiteral("merge-font"),
+                                    QStringLiteral("Source font file to merge glyphs from."),
+                                    QStringLiteral("file"));
+    QCommandLineOption sourceRangeOpt(QStringLiteral("source-range"),
+                                      QStringLiteral("Source Unicode range to merge (e.g. 'U+E000-U+E0FF' or 'all'). Defaults to 'all'."),
+                                      QStringLiteral("range"), QStringLiteral("all"));
+    QCommandLineOption targetStartOpt(QStringLiteral("target-start"),
+                                      QStringLiteral("Target starting Unicode code point for merged glyphs (e.g. U+F0000). If omitted, keeps source code points."),
+                                      QStringLiteral("unicode"));
+    QCommandLineOption noScaleToEmOpt(QStringLiteral("no-scale-to-em"),
+                                      QStringLiteral("Do not scale merged glyph outlines to target font EM size."));
+    QCommandLineOption noCopyMetricsOpt(QStringLiteral("no-copy-metrics"),
+                                        QStringLiteral("Do not copy advance width metrics from source font."));
     QCommandLineOption placementOpt(QStringLiteral("placement"),
                                     QStringLiteral("Placement mode: auto, baseline, center-ascent, center-em, raw. Defaults to auto."),
                                     QStringLiteral("mode"), QStringLiteral("auto"));
@@ -87,6 +100,11 @@ int main(int argc, char* argv[]) {
     parser.addOption(startUnicodeOpt);
     parser.addOption(importImagesOpt);
     parser.addOption(importDefOpt);
+    parser.addOption(mergeFontOpt);
+    parser.addOption(sourceRangeOpt);
+    parser.addOption(targetStartOpt);
+    parser.addOption(noScaleToEmOpt);
+    parser.addOption(noCopyMetricsOpt);
     parser.addOption(placementOpt);
     parser.addOption(scaleFactorOpt);
     parser.addOption(overwriteOpt);
@@ -101,6 +119,7 @@ int main(int argc, char* argv[]) {
     const QString outputFont = parser.value(outputOpt);
     const QString importImages = parser.value(importImagesOpt);
     const QString importDef = parser.value(importDefOpt);
+    const QString mergeFont = parser.value(mergeFontOpt);
     const bool forceHeadless = parser.isSet(headlessOpt);
     const bool forceGui = parser.isSet(guiOpt);
 
@@ -110,10 +129,11 @@ int main(int argc, char* argv[]) {
     }
 
     const bool hasBatchJob = (!importImages.isEmpty() || !importDef.isEmpty());
-    const bool runHeadless = forceHeadless || (hasBatchJob && !outputFont.isEmpty() && !forceGui);
+    const bool hasMergeJob = (!mergeFont.isEmpty());
+    const bool runHeadless = forceHeadless || ((hasBatchJob || hasMergeJob) && !outputFont.isEmpty() && !forceGui);
 
     if (runHeadless) {
-        std::cout << "FontForgeGUI v0.5.0 (Headless Batch Mode)\n";
+        std::cout << "FontForgeGUI v0.5.3 (Headless Batch Mode)\n";
         ffgui::FontForgeBridge bridge;
         bridge.initialize();
 
@@ -194,6 +214,36 @@ int main(int argc, char* argv[]) {
             for (const auto& e : bRes.errors) {
                 std::cerr << "  - " << e.toStdString() << "\n";
             }
+        }
+
+        if (hasMergeJob) {
+            ffgui::FontMergeOptions mergeOpts;
+            mergeOpts.sourceFontPath = mergeFont;
+            mergeOpts.sourceRange = parser.value(sourceRangeOpt).trimmed().isEmpty()
+                                        ? QStringLiteral("all")
+                                        : parser.value(sourceRangeOpt).trimmed();
+            if (parser.isSet(targetStartOpt)) {
+                mergeOpts.targetStartUnicode = parseCliUnicode(parser.value(targetStartOpt));
+                if (mergeOpts.targetStartUnicode < 0) {
+                    std::cerr << "Invalid target start unicode: "
+                              << parser.value(targetStartOpt).toStdString() << "\n";
+                    return 1;
+                }
+            } else {
+                mergeOpts.targetStartUnicode = -1;
+            }
+            mergeOpts.scaleToEm = !parser.isSet(noScaleToEmOpt);
+            mergeOpts.copyMetrics = !parser.isSet(noCopyMetricsOpt);
+            mergeOpts.overwriteExisting = parser.isSet(overwriteOpt);
+
+            std::cout << "Merging glyphs from: " << mergeFont.toStdString() << " (range: "
+                      << mergeOpts.sourceRange.toStdString() << ")...\n";
+            ffgui::FontMergeResult mRes;
+            if (!bridge.mergeFont(mergeOpts, &mRes, &err)) {
+                std::cerr << "Font merge failed: " << err.toStdString() << "\n";
+                return 1;
+            }
+            std::cout << "Successfully merged " << mRes.importedCount << " glyph(s).\n";
         }
 
         if (!outputFont.isEmpty()) {

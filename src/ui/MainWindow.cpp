@@ -2,6 +2,7 @@
 
 #include "backend/FontWorker.hpp"
 #include "model/FontSettingsUtils.hpp"
+#include "model/GlyphClipboardUtils.hpp"
 #include "model/GlyphListModel.hpp"
 #include "model/UnicodeRangeFilter.hpp"
 #include "ui/BatchImportDialog.hpp"
@@ -9,6 +10,7 @@
 #include "ui/ExportFontDialog.hpp"
 #include "ui/FontMetadataDialog.hpp"
 #include "ui/ImportFilterSettingsDialog.hpp"
+#include "ui/ImportFontDialog.hpp"
 #include "ui/GlyphGridDelegate.hpp"
 #include "ui/GlyphGridView.hpp"
 #include "ui/GlyphInspectorPanel.hpp"
@@ -19,6 +21,7 @@
 
 #include <QAction>
 #include <QCheckBox>
+#include <QClipboard>
 #include <QComboBox>
 #include <QDockWidget>
 #include <QFileDialog>
@@ -28,6 +31,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QListView>
+#include <QMenu>
 #include <QMenu>
 #include <QMenuBar>
 #include <QMessageBox>
@@ -60,6 +64,9 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     qRegisterMetaType<MoveGlyphsResult>("ffgui::MoveGlyphsResult");
     qRegisterMetaType<BatchImportJob>("ffgui::BatchImportJob");
     qRegisterMetaType<BatchImportResult>("ffgui::BatchImportResult");
+    qRegisterMetaType<FontMergeOptions>("ffgui::FontMergeOptions");
+    qRegisterMetaType<FontMergeResult>("ffgui::FontMergeResult");
+    qRegisterMetaType<QVector<ffgui::GlyphSummary>>("QVector<ffgui::GlyphSummary>");
 
     m_areaConfig = CustomGlyphAreaConfig::createDefault();
 
@@ -96,6 +103,10 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     connect(m_worker, &FontWorker::svgImportFailed, this, &MainWindow::onSvgImportFailed);
     connect(m_worker, &FontWorker::batchImportCompleted, this, &MainWindow::onBatchImportCompleted);
     connect(m_worker, &FontWorker::batchImportFailed, this, &MainWindow::onBatchImportFailed);
+    connect(m_worker, &FontWorker::fontMerged, this, &MainWindow::onFontMerged);
+    connect(m_worker, &FontWorker::fontMergeFailed, this, &MainWindow::onFontMergeFailed);
+    connect(m_worker, &FontWorker::glyphsPasted, this, &MainWindow::onGlyphsPasted);
+    connect(m_worker, &FontWorker::glyphsPasteFailed, this, &MainWindow::onGlyphsPasteFailed);
     connect(m_worker, &FontWorker::fontClosed, this, &MainWindow::onFontClosed);
     connect(m_worker, &FontWorker::logMessage, this, &MainWindow::onLogMessage);
     connect(m_worker, &FontWorker::progressUpdated, this, &MainWindow::onProgressUpdated);
@@ -212,6 +223,17 @@ void MainWindow::setupUi() {
     m_gridView->setSelectionMode(QAbstractItemView::ExtendedSelection);
     m_gridView->setMouseTracking(true);
     m_gridView->setEmptyDropEnabled(true);
+    m_gridView->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(m_gridView, &QWidget::customContextMenuRequested, this, [this](const QPoint& pos) {
+        if (!m_hasOpenFont) return;
+        QMenu menu(this);
+        menu.addAction(m_copyGlyphsAction);
+        menu.addAction(m_pasteGlyphsAction);
+        menu.addSeparator();
+        menu.addAction(m_moveGlyphsAction);
+        menu.addAction(m_importSvgAction);
+        menu.exec(m_gridView->viewport()->mapToGlobal(pos));
+    });
 
     m_inspector = new GlyphInspectorPanel(splitter);
 
@@ -303,12 +325,19 @@ void MainWindow::setupMenusAndToolbar() {
                                          &MainWindow::onSaveFontAsClicked);
     m_exportAction = fileMenu->addAction(tr("&Export Font…"), QKeySequence(QStringLiteral("Ctrl+E")),
                                          this, &MainWindow::onExportFontClicked);
+    m_importFontAction = fileMenu->addAction(tr("&Import Glyphs from Font…"), this,
+                                             &MainWindow::onImportFontClicked);
     m_closeAction = fileMenu->addAction(tr("&Close Font"), QKeySequence::Close, this,
                                         &MainWindow::onCloseFontClicked);
     fileMenu->addSeparator();
     fileMenu->addAction(tr("E&xit"), QKeySequence::Quit, this, &QWidget::close);
 
     auto* editMenu = menuBar()->addMenu(tr("&Edit"));
+    m_copyGlyphsAction = editMenu->addAction(tr("&Copy Selected Glyph(s)"), QKeySequence::Copy, this,
+                                             &MainWindow::onCopyGlyphsClicked);
+    m_pasteGlyphsAction = editMenu->addAction(tr("&Paste Glyph(s)"), QKeySequence::Paste, this,
+                                              &MainWindow::onPasteGlyphsClicked);
+    editMenu->addSeparator();
     editMenu->addAction(tr("&Import Preferences…"), this, [this]() {
         ImportFilterSettingsDialog dlg(loadDefaultImportOptions(), this);
         if (dlg.exec() == QDialog::Accepted) {
@@ -360,6 +389,7 @@ void MainWindow::setupMenusAndToolbar() {
     toolbar->addAction(m_moveGlyphsAction);
     toolbar->addAction(m_importSvgAction);
     toolbar->addAction(m_batchImportAction);
+    toolbar->addAction(m_importFontAction);
     toolbar->addAction(m_fontMetaAction);
     toolbar->addAction(m_validateAction);
 
@@ -371,6 +401,9 @@ void MainWindow::setupMenusAndToolbar() {
     m_moveGlyphsAction->setEnabled(false);
     m_importSvgAction->setEnabled(false);
     m_batchImportAction->setEnabled(false);
+    m_importFontAction->setEnabled(false);
+    m_copyGlyphsAction->setEnabled(false);
+    m_pasteGlyphsAction->setEnabled(false);
     m_fontMetaAction->setEnabled(false);
     m_validateAction->setEnabled(false);
     m_saveAreasBtn->setEnabled(false);
@@ -600,6 +633,87 @@ void MainWindow::onImportSvgClicked() {
                               Q_ARG(ffgui::SvgImportOptions, opts));
 }
 
+void MainWindow::onCopyGlyphsClicked() {
+    if (!m_hasOpenFont) {
+        return;
+    }
+    const QVector<GlyphSummary> sel = currentSelectedGlyphs();
+    if (sel.isEmpty()) {
+        return;
+    }
+    const FontSummary& s = m_model->fontSummary();
+    QMimeData* mime = serializeGlyphsToMimeData(sel, s.ascent, s.descent);
+    QGuiApplication::clipboard()->setMimeData(mime);
+    statusBar()->showMessage(tr("Copied %1 glyph(s) to clipboard").arg(sel.size()), 4000);
+}
+
+void MainWindow::onPasteGlyphsClicked() {
+    if (!m_hasOpenFont) {
+        return;
+    }
+    const QMimeData* mime = QGuiApplication::clipboard()->mimeData();
+    if (!canPasteGlyphs(mime)) {
+        QMessageBox::information(this, tr("Paste Glyphs"),
+                                 tr("Clipboard does not contain valid glyph data or SVG."));
+        return;
+    }
+
+    QVector<GlyphSummary> glyphs = deserializeGlyphsFromMimeData(mime);
+    if (glyphs.isEmpty()) {
+        const QByteArray svg = getSvgFromMimeForGlyph(mime, 0);
+        if (!svg.isEmpty()) {
+            GlyphSummary g;
+            g.name = QStringLiteral("pasted_glyph");
+            g.svgData = svg;
+            glyphs.append(g);
+        }
+    }
+
+    if (glyphs.isEmpty()) {
+        QMessageBox::warning(this, tr("Paste Glyphs"), tr("Could not extract glyph data from clipboard."));
+        return;
+    }
+
+    int targetStart = -1;
+    const GlyphSummary* sel = currentSelectedGlyph();
+    if (sel && sel->unicode >= 0) {
+        targetStart = sel->unicode;
+    } else {
+        int maxCp = 0xE000;
+        for (const auto& g : m_model->allGlyphs()) {
+            if (g.unicode >= maxCp) {
+                maxCp = g.unicode + 1;
+            }
+        }
+        targetStart = maxCp;
+    }
+
+    constexpr bool overwrite = true;
+    setBusy(true, tr("Pasting %1 glyph(s) at U+%2…")
+                      .arg(glyphs.size())
+                      .arg(targetStart, 4, 16, QLatin1Char('0'))
+                      .toUpper());
+    QMetaObject::invokeMethod(m_worker, "pasteGlyphs", Qt::QueuedConnection,
+                              Q_ARG(QVector<ffgui::GlyphSummary>, glyphs),
+                              Q_ARG(int32_t, static_cast<int32_t>(targetStart)),
+                              Q_ARG(bool, overwrite));
+}
+
+void MainWindow::onImportFontClicked() {
+    if (!m_hasOpenFont) {
+        return;
+    }
+    const FontDocumentSnapshot snap{m_model->fontSummary(), m_model->allGlyphs()};
+    ImportFontDialog dlg(snap, this);
+    if (dlg.exec() != QDialog::Accepted) {
+        return;
+    }
+    const FontMergeOptions opts = dlg.mergeOptions();
+    setBusy(true, tr("Importing glyphs from %1…").arg(QFileInfo(opts.sourceFontPath).fileName()));
+    QMetaObject::invokeMethod(m_worker, "mergeFont", Qt::QueuedConnection,
+                              Q_ARG(ffgui::FontMergeOptions, opts));
+}
+
 void MainWindow::onFontLoaded(const FontDocumentSnapshot& snapshot) {
     setBusy(false);
     m_hasOpenFont = true;
@@ -629,6 +743,9 @@ void MainWindow::onFontLoaded(const FontDocumentSnapshot& snapshot) {
     m_newGlyphAction->setEnabled(true);
     m_moveGlyphsAction->setEnabled(true);
     m_batchImportAction->setEnabled(true);
+    m_importFontAction->setEnabled(true);
+    m_pasteGlyphsAction->setEnabled(true);
+    m_copyGlyphsAction->setEnabled(m_gridView->selectionModel() && !m_gridView->selectionModel()->selectedIndexes().isEmpty());
     m_fontMetaAction->setEnabled(true);
     m_validateAction->setEnabled(true);
     m_saveAreasBtn->setEnabled(true);
@@ -861,6 +978,42 @@ void MainWindow::onSvgImportFailed(const QString& error) {
     statusBar()->showMessage(tr("SVG import failed"), 4000);
 }
 
+void MainWindow::onFontMerged(const FontMergeResult& result) {
+    setBusy(false);
+    m_modified = true;
+    if (!result.snapshot.glyphs.isEmpty()) {
+        m_model->setDocument(result.snapshot);
+        m_inspector->setFontSummary(result.snapshot.summary);
+    }
+    onGlyphSelectionChanged();
+    updateWindowTitleAndCounts();
+    statusBar()->showMessage(tr("Successfully imported %1 glyph(s) from font").arg(result.importedCount), 6000);
+}
+
+void MainWindow::onFontMergeFailed(const QString& error) {
+    setBusy(false);
+    QMessageBox::warning(this, tr("Import From Font Failed"), error);
+    statusBar()->showMessage(tr("Font import failed"), 4000);
+}
+
+void MainWindow::onGlyphsPasted(const FontMergeResult& result) {
+    setBusy(false);
+    m_modified = true;
+    if (!result.snapshot.glyphs.isEmpty()) {
+        m_model->setDocument(result.snapshot);
+        m_inspector->setFontSummary(result.snapshot.summary);
+    }
+    onGlyphSelectionChanged();
+    updateWindowTitleAndCounts();
+    statusBar()->showMessage(tr("Successfully pasted %1 glyph(s)").arg(result.importedCount), 5000);
+}
+
+void MainWindow::onGlyphsPasteFailed(const QString& error) {
+    setBusy(false);
+    QMessageBox::warning(this, tr("Paste Glyphs Failed"), error);
+    statusBar()->showMessage(tr("Paste failed"), 4000);
+}
+
 void MainWindow::onFontClosed() {
     m_hasOpenFont = false;
     m_modified = false;
@@ -877,6 +1030,9 @@ void MainWindow::onFontClosed() {
     m_moveGlyphsAction->setEnabled(false);
     m_importSvgAction->setEnabled(false);
     m_batchImportAction->setEnabled(false);
+    m_importFontAction->setEnabled(false);
+    m_copyGlyphsAction->setEnabled(false);
+    m_pasteGlyphsAction->setEnabled(false);
     m_fontMetaAction->setEnabled(false);
     m_validateAction->setEnabled(false);
     m_saveAreasBtn->setEnabled(false);
@@ -994,7 +1150,9 @@ void MainWindow::onGlyphSelectionChanged() {
     const GlyphSummary* g = currentSelectedGlyph();
     m_inspector->setGlyph(g);
     m_importSvgAction->setEnabled(m_hasOpenFont && g != nullptr);
-    m_moveGlyphsAction->setEnabled(m_hasOpenFont && !currentSelectedGlyphs().isEmpty());
+    const bool hasSelection = !currentSelectedGlyphs().isEmpty();
+    m_moveGlyphsAction->setEnabled(m_hasOpenFont && hasSelection);
+    m_copyGlyphsAction->setEnabled(m_hasOpenFont && hasSelection);
 }
 
 void MainWindow::onValidationGlyphSelected(int gid) {
@@ -1021,6 +1179,9 @@ void MainWindow::setBusy(bool busy, const QString& message) {
     m_newGlyphAction->setEnabled(!busy && m_hasOpenFont);
     m_moveGlyphsAction->setEnabled(!busy && m_hasOpenFont && !currentSelectedGlyphs().isEmpty());
     m_batchImportAction->setEnabled(!busy && m_hasOpenFont);
+    m_importFontAction->setEnabled(!busy && m_hasOpenFont);
+    m_copyGlyphsAction->setEnabled(!busy && m_hasOpenFont && !currentSelectedGlyphs().isEmpty());
+    m_pasteGlyphsAction->setEnabled(!busy && m_hasOpenFont);
     m_importSvgAction->setEnabled(!busy && m_hasOpenFont && currentSelectedGlyph() != nullptr);
     m_fontMetaAction->setEnabled(!busy && m_hasOpenFont);
     m_validateAction->setEnabled(!busy && m_hasOpenFont);

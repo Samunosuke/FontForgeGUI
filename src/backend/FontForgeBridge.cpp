@@ -1,5 +1,6 @@
 #include "backend/FontForgeBridge.hpp"
 #include "model/BitmapTracer.hpp"
+#include "model/GlyphClipboardUtils.hpp"
 #include "model/GlyphMetadataUtils.hpp"
 #include "model/SvgSanitizer.hpp"
 
@@ -1547,6 +1548,273 @@ bool FontForgeBridge::batchImport(const BatchImportJob& job, BatchImportResult* 
     res.snapshot = buildSnapshot(sf, m_impl->fv, m_impl->currentPath);
     if (outResult != nullptr) {
         *outResult = std::move(res);
+    }
+    return true;
+}
+
+bool FontForgeBridge::mergeFont(const FontMergeOptions& options, FontMergeResult* outResult,
+                                QString* outError) {
+    if (!hasOpenFont()) {
+        if (outError) {
+            *outError = QStringLiteral("No font is currently loaded.");
+        }
+        return false;
+    }
+
+    if (options.sourceFontPath.isEmpty() || !QFileInfo::exists(options.sourceFontPath)) {
+        if (outError) {
+            *outError = QStringLiteral("Source font file does not exist: %1").arg(options.sourceFontPath);
+        }
+        return false;
+    }
+
+    QList<QPair<int32_t, int32_t>> ranges;
+    QString rangeErr;
+    if (!parseCodePointRange(options.sourceRange, &ranges, &rangeErr)) {
+        if (outError) {
+            *outError = QStringLiteral("Invalid source range '%1': %2").arg(options.sourceRange, rangeErr);
+        }
+        return false;
+    }
+
+    g_lastError.clear();
+    const QByteArray srcPathBytes = options.sourceFontPath.toUtf8();
+    SplineFont* srcSf = LoadSplineFont(srcPathBytes.constData(), static_cast<enum openflags>(0));
+    if (srcSf == nullptr) {
+        if (outError) {
+            *outError = g_lastError.isEmpty()
+                            ? QStringLiteral("Failed to load source font: %1").arg(options.sourceFontPath)
+                            : g_lastError;
+        }
+        return false;
+    }
+
+    struct SourceItem {
+        SplineChar* sc = nullptr;
+        int32_t srcUnicode = -1;
+        int32_t targetUnicode = -1;
+    };
+    QVector<SourceItem> toCopy;
+    int32_t nextTargetUnicode = options.targetStartUnicode;
+
+    for (int gid = 0; gid < srcSf->glyphcnt; ++gid) {
+        SplineChar* sc = srcSf->glyphs[gid];
+        if (sc == nullptr) continue;
+        const int32_t u = sc->unicodeenc;
+        if (u < 0) continue;
+        if (!isCodePointInRanges(u, ranges)) continue;
+
+        int32_t tgtU = (options.targetStartUnicode >= 0) ? (nextTargetUnicode++) : u;
+        toCopy.append({sc, u, tgtU});
+    }
+
+    if (toCopy.isEmpty()) {
+        SplineFontFree(srcSf);
+        if (outError) {
+            *outError = QStringLiteral("No matching glyphs found in source font for range '%1'.").arg(options.sourceRange);
+        }
+        return false;
+    }
+
+    SplineFont* tgtSf = m_impl->sf;
+    if (!options.overwriteExisting) {
+        for (const auto& item : toCopy) {
+            for (int gid = 0; gid < tgtSf->glyphcnt; ++gid) {
+                const SplineChar* occ = tgtSf->glyphs[gid];
+                if (occ != nullptr && occ->unicodeenc == item.targetUnicode) {
+                    SplineFontFree(srcSf);
+                    const QString occName = QString::fromUtf8(occ->name ? occ->name : "");
+                    if (outError) {
+                        *outError = QStringLiteral("Target code point %1 is already occupied by '%2'.")
+                                        .arg(formatCodePoint(item.targetUnicode), occName);
+                    }
+                    return false;
+                }
+            }
+        }
+    }
+
+    const double srcEm = (srcSf->ascent + srcSf->descent) > 0 ? (srcSf->ascent + srcSf->descent) : 1000.0;
+    const double tgtEm = (tgtSf->ascent + tgtSf->descent) > 0 ? (tgtSf->ascent + tgtSf->descent) : 1000.0;
+    const double scale = (options.scaleToEm && std::abs(srcEm - tgtEm) > 1e-4) ? (tgtEm / srcEm) : 1.0;
+    real transform[6] = {static_cast<real>(scale), 0, 0, static_cast<real>(scale), 0, 0};
+
+    for (const auto& item : toCopy) {
+        SplineChar* tgtSc = nullptr;
+        for (int gid = 0; gid < tgtSf->glyphcnt; ++gid) {
+            SplineChar* sc = tgtSf->glyphs[gid];
+            if (sc != nullptr && sc->unicodeenc == item.targetUnicode) {
+                tgtSc = sc;
+                break;
+            }
+        }
+
+        const QString origName = QString::fromUtf8(item.sc->name ? item.sc->name : "");
+        QString chosenName = origName;
+        if (chosenName.isEmpty() || SFHashName(tgtSf, chosenName.toUtf8().constData()) != nullptr) {
+            chosenName = suggestedGlyphName(item.targetUnicode);
+        }
+        if (chosenName.isEmpty()) {
+            chosenName = QStringLiteral("glyph_%1").arg(item.targetUnicode, 4, 16, QLatin1Char('0'));
+        }
+
+        if (tgtSc == nullptr) {
+            tgtSc = SFSplineCharCreate(tgtSf);
+            if (tgtSc != nullptr) {
+                tgtSc->unicodeenc = item.targetUnicode;
+                tgtSc->name = copy(chosenName.toUtf8().constData());
+                SFAddGlyphAndEncode(tgtSf, tgtSc, nullptr, -1);
+            }
+        }
+
+        if (tgtSc == nullptr) {
+            continue;
+        }
+
+        if (tgtSc->layers != nullptr && tgtSc->layer_cnt > ly_fore) {
+            SplinePointListFree(tgtSc->layers[ly_fore].splines);
+            tgtSc->layers[ly_fore].splines = nullptr;
+        }
+
+        if (item.sc->layers != nullptr && item.sc->layer_cnt > ly_fore && item.sc->layers[ly_fore].splines != nullptr) {
+            tgtSc->layers[ly_fore].splines = SplinePointListCopy(item.sc->layers[ly_fore].splines);
+            if (std::abs(scale - 1.0) > 1e-4) {
+                tgtSc->layers[ly_fore].splines =
+                    SplinePointListTransform(tgtSc->layers[ly_fore].splines, transform, tpt_AllPoints);
+            }
+        }
+
+        if (options.copyMetrics) {
+            tgtSc->width = static_cast<int>(std::round(item.sc->width * scale));
+            tgtSc->vwidth = static_cast<int>(std::round(item.sc->vwidth * scale));
+        }
+
+        tgtSc->unicodeenc = item.targetUnicode;
+        if (!chosenName.isEmpty() && (tgtSc->name == nullptr || chosenName != QString::fromUtf8(tgtSc->name))) {
+            if (SFHashName(tgtSf, chosenName.toUtf8().constData()) == nullptr) {
+                free(tgtSc->name);
+                tgtSc->name = copy(chosenName.toUtf8().constData());
+            }
+        }
+
+        SCRefreshTitles(tgtSc);
+        SCCharChangedUpdate(tgtSc, ly_fore);
+    }
+
+    SplineFontFree(srcSf);
+    tgtSf->changed = true;
+
+    if (outResult) {
+        outResult->success = true;
+        outResult->importedCount = toCopy.size();
+        outResult->snapshot = buildSnapshot(tgtSf, m_impl->fv, m_impl->currentPath);
+    }
+    return true;
+}
+
+bool FontForgeBridge::pasteGlyphs(const QVector<GlyphSummary>& glyphs, int32_t targetStartUnicode,
+                                  bool overwriteExisting, FontMergeResult* outResult, QString* outError) {
+    if (!hasOpenFont()) {
+        if (outError) {
+            *outError = QStringLiteral("No font is currently loaded.");
+        }
+        return false;
+    }
+
+    if (glyphs.isEmpty()) {
+        if (outError) {
+            *outError = QStringLiteral("No glyphs provided to paste.");
+        }
+        return false;
+    }
+
+    SplineFont* tgtSf = m_impl->sf;
+    int32_t nextTarget = (targetStartUnicode >= 0) ? targetStartUnicode : 0xF0000;
+
+    if (!overwriteExisting) {
+        for (int i = 0; i < glyphs.size(); ++i) {
+            const int32_t targetU = (targetStartUnicode >= 0) ? (nextTarget + i) : (glyphs[i].unicode >= 0 ? glyphs[i].unicode : (nextTarget + i));
+            for (int gid = 0; gid < tgtSf->glyphcnt; ++gid) {
+                const SplineChar* occ = tgtSf->glyphs[gid];
+                if (occ != nullptr && occ->unicodeenc == targetU) {
+                    if (outError) {
+                        *outError = QStringLiteral("Target code point %1 is already occupied by '%2'.")
+                                        .arg(formatCodePoint(targetU), QString::fromUtf8(occ->name ? occ->name : ""));
+                    }
+                    return false;
+                }
+            }
+        }
+    }
+
+    int count = 0;
+    for (int i = 0; i < glyphs.size(); ++i) {
+        const GlyphSummary& g = glyphs[i];
+        const int32_t targetU = (targetStartUnicode >= 0) ? (nextTarget + i) : (g.unicode >= 0 ? g.unicode : (nextTarget + i));
+
+        SplineChar* tgtSc = nullptr;
+        for (int gid = 0; gid < tgtSf->glyphcnt; ++gid) {
+            SplineChar* sc = tgtSf->glyphs[gid];
+            if (sc != nullptr && sc->unicodeenc == targetU) {
+                tgtSc = sc;
+                break;
+            }
+        }
+        QString chosenName = g.name;
+        if (chosenName.isEmpty() || SFHashName(tgtSf, chosenName.toUtf8().constData()) != nullptr) {
+            chosenName = suggestedGlyphName(targetU);
+        }
+        if (chosenName.isEmpty()) {
+            chosenName = QStringLiteral("glyph_%1").arg(targetU, 4, 16, QLatin1Char('0'));
+        }
+
+        if (tgtSc == nullptr) {
+            tgtSc = SFSplineCharCreate(tgtSf);
+            if (tgtSc != nullptr) {
+                tgtSc->unicodeenc = targetU;
+                tgtSc->name = copy(chosenName.toUtf8().constData());
+                SFAddGlyphAndEncode(tgtSf, tgtSc, nullptr, -1);
+            }
+        }
+        if (tgtSc == nullptr) continue;
+
+        QByteArray svgData = g.svgData;
+        if (svgData.isEmpty()) {
+            svgData = glyphToSvg(g, tgtSf->ascent, tgtSf->descent);
+        }
+        SvgImportOptions opts;
+        opts.gid = tgtSc->orig_pos;
+        opts.svgData = svgData;
+        opts.replaceExistingContours = true;
+        opts.scaleToEm = false;
+        opts.placementMode = GlyphPlacementMode::OriginalSvgCoords;
+        opts.updateAdvanceWidth = true;
+        SvgImportResult importRes;
+        QString impErr;
+        if (importSvgToGlyph(opts, &importRes, &impErr)) {
+            tgtSc->width = g.width > 0 ? g.width : (tgtSf->ascent + tgtSf->descent);
+            tgtSc->unicodeenc = targetU;
+            if (!g.name.isEmpty()) {
+                QString chosenName = g.name;
+                if (SFHashName(tgtSf, chosenName.toUtf8().constData()) != nullptr) {
+                    chosenName = suggestedGlyphName(targetU);
+                }
+                if (!chosenName.isEmpty() && SFHashName(tgtSf, chosenName.toUtf8().constData()) == nullptr) {
+                    free(tgtSc->name);
+                    tgtSc->name = copy(chosenName.toUtf8().constData());
+                }
+            }
+            SCRefreshTitles(tgtSc);
+            SCCharChangedUpdate(tgtSc, ly_fore);
+            ++count;
+        }
+    }
+
+    tgtSf->changed = true;
+    if (outResult) {
+        outResult->success = true;
+        outResult->importedCount = count;
+        outResult->snapshot = buildSnapshot(tgtSf, m_impl->fv, m_impl->currentPath);
     }
     return true;
 }
