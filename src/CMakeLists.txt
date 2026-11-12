@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(FontForgeGUI VERSION 0.3.0 LANGUAGES C CXX)
+project(FontForgeGUI VERSION 0.4.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -53,6 +53,8 @@ add_library(ffgui_core STATIC
     model/GlyphMetadataUtils.cpp
     model/SvgSanitizer.hpp
     model/SvgSanitizer.cpp
+    model/BitmapTracer.hpp
+    model/BitmapTracer.cpp
 )
 
 target_include_directories(ffgui_core
@@ -64,6 +66,7 @@ target_link_libraries(ffgui_core
     PUBLIC
         Qt6::Core
         Qt6::Gui
+        Qt6::Svg
     PRIVATE
         Qt6::Xml
         fontforge
@@ -137,4 +140,11 @@ if(BUILD_TESTING)
         TEST_FONTS_DIR="${FONTFORGE_SOURCE_DIR}/tests/fonts"
     )
     add_test(NAME v03_svg_import COMMAND test_v03_svg_import)
+
+    add_executable(test_v04_features tests/test_v04_features.cpp)
+    target_link_libraries(test_v04_features PRIVATE ffgui_core)
+    target_compile_definitions(test_v04_features PRIVATE
+        TEST_FONTS_DIR="${FONTFORGE_SOURCE_DIR}/tests/fonts"
+    )
+    add_test(NAME v04_features COMMAND test_v04_features)
 endif()

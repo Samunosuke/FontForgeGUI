@@ -1,6 +1,8 @@
 #include "backend/FontForgeBridge.hpp"
 
 #include <QByteArray>
+#include <QDir>
+#include <QFile>
 #include <QFileInfo>
 #include <QTransform>
 
@@ -565,12 +567,37 @@ bool FontForgeBridge::exportFont(const ExportOptions& options, QString* outError
     }
 
     g_lastError.clear();
-    QByteArray outBytes = options.outputPath.toUtf8();
+
+    const QFileInfo targetInfo(options.outputPath);
+    const QFileInfo currentInfo(m_impl->currentPath);
+    const bool isInPlaceSave = !m_impl->currentPath.isEmpty() && targetInfo.exists() &&
+        (targetInfo.canonicalFilePath() == currentInfo.canonicalFilePath() ||
+         targetInfo.absoluteFilePath() == currentInfo.absoluteFilePath());
+
+    // When saving over the currently open font file (e.g. Ctrl+S), write to a temporary
+    // sibling file with the same extension first so a generation failure never corrupts
+    // the original file on disk.
+    const bool isDirFormat = m_impl->sf->save_to_dir != 0 ||
+        options.outputPath.endsWith(QStringLiteral(".ufo"), Qt::CaseInsensitive);
+    const QString writePath = (isInPlaceSave && !isDirFormat)
+        ? QDir(targetInfo.absolutePath())
+              .filePath(QStringLiteral(".%1.tmp.%2")
+                            .arg(targetInfo.completeBaseName(), targetInfo.suffix()))
+        : options.outputPath;
+
+    if (writePath != options.outputPath && QFile::exists(writePath)) {
+        QFile::remove(writePath);
+    }
+
+    QByteArray outBytes = writePath.toUtf8();
 
     if (options.outputPath.endsWith(QStringLiteral(".sfd"), Qt::CaseInsensitive)) {
         const int ok = SFDWrite(outBytes.data(), m_impl->sf, m_impl->fv->map, m_impl->fv->normal,
                                 m_impl->sf->save_to_dir);
         if (!ok) {
+            if (writePath != options.outputPath) {
+                QFile::remove(writePath);
+            }
             if (outError) {
                 *outError = g_lastError.isEmpty()
                                 ? QStringLiteral("Failed to write SFD file: %1")
@@ -579,39 +606,63 @@ bool FontForgeBridge::exportFont(const ExportOptions& options, QString* outError
             }
             return false;
         }
-        return true;
-    }
-
-    int fmFlags = 0;
-    if (options.roundToInt) {
-        fmFlags |= fm_flag_round;
-    }
-    if (!options.opentypeTables) {
-        fmFlags |= fm_flag_apple;
-    }
-    if (options.omitHints) {
-        fmFlags |= fm_flag_nottfhints | fm_flag_nopshints;
-    }
-    if (options.dummyDsig) {
-        fmFlags |= fm_flag_dummyDSIG;
-    }
-    if (options.generateAfm) {
-        fmFlags |= fm_flag_afm;
-    }
-
-    EncMap* exportMap = m_impl->fv->normal != nullptr ? m_impl->fv->normal : m_impl->fv->map;
-    const int layer = m_impl->fv->active_layer >= 0 ? m_impl->fv->active_layer : ly_fore;
-
-    const int ok = GenerateScript(m_impl->sf, outBytes.data(), "", fmFlags, -1, nullptr, nullptr,
-                                  exportMap, nullptr, layer);
-    if (!ok) {
-        if (outError) {
-            *outError = g_lastError.isEmpty()
-                            ? QStringLiteral("Failed to export font to: %1")
-                                  .arg(options.outputPath)
-                            : g_lastError;
+    } else {
+        int fmFlags = 0;
+        if (options.roundToInt) {
+            fmFlags |= fm_flag_round;
         }
-        return false;
+        if (!options.opentypeTables) {
+            fmFlags |= fm_flag_apple;
+        }
+        if (options.omitHints) {
+            fmFlags |= fm_flag_nottfhints | fm_flag_nopshints;
+        }
+        if (options.dummyDsig) {
+            fmFlags |= fm_flag_dummyDSIG;
+        }
+        if (options.generateAfm) {
+            fmFlags |= fm_flag_afm;
+        }
+
+        EncMap* exportMap = m_impl->fv->normal != nullptr ? m_impl->fv->normal : m_impl->fv->map;
+        const int layer = m_impl->fv->active_layer >= 0 ? m_impl->fv->active_layer : ly_fore;
+
+        const int ok = GenerateScript(m_impl->sf, outBytes.data(), "", fmFlags, -1, nullptr,
+                                      nullptr, exportMap, nullptr, layer);
+        if (!ok) {
+            if (writePath != options.outputPath) {
+                QFile::remove(writePath);
+            }
+            if (outError) {
+                *outError = g_lastError.isEmpty()
+                                ? QStringLiteral("Failed to export font to: %1")
+                                      .arg(options.outputPath)
+                                : g_lastError;
+            }
+            return false;
+        }
+    }
+
+    if (writePath != options.outputPath) {
+        if (QFile::exists(options.outputPath) && !QFile::remove(options.outputPath)) {
+            QFile::remove(writePath);
+            if (outError) {
+                *outError = QStringLiteral("Failed to replace existing font file: %1")
+                                .arg(options.outputPath);
+            }
+            return false;
+        }
+        if (!QFile::rename(writePath, options.outputPath)) {
+            if (outError) {
+                *outError = QStringLiteral("Failed to finalize saved font file: %1")
+                                .arg(options.outputPath);
+            }
+            return false;
+        }
+    }
+
+    if (isInPlaceSave) {
+        m_impl->sf->changed = false;
     }
     return true;
 }
@@ -1077,6 +1128,34 @@ bool FontForgeBridge::importSvgToGlyph(const SvgImportOptions& options, SvgImpor
     }
     spl = appendSpl(spl, cutoutSpl);
 
+    if (options.updateAdvanceWidth && options.svgWidth > 0.0) {
+        const double rawWidth =
+            (options.scaleToEm && options.svgHeight > 0.0)
+                ? options.svgWidth * (static_cast<double>(emSize) / options.svgHeight)
+                : options.svgWidth;
+        sc->width = static_cast<int16_t>(std::clamp<long>(std::lround(rawWidth), 0L, 32767L));
+        sc->widthset = true;
+    }
+
+    // Apply automatic aspect-ratio / baseline / center positioning and manual scale/offset
+    if (spl != nullptr) {
+        DBounds b{};
+        SplineSetFindBounds(spl, &b);
+        if (b.maxx > b.minx && b.maxy > b.miny) {
+            const IconPlacementTransform pt = computeIconPlacement(
+                b.minx, b.maxx, b.miny, b.maxy, static_cast<double>(sc->width), sf->ascent,
+                sf->descent, options);
+            if (std::abs(pt.scale - 1.0) > 1e-6 || std::abs(pt.tx) > 1e-6 ||
+                std::abs(pt.ty) > 1e-6) {
+                real transform[6] = {
+                    static_cast<real>(pt.scale), 0.0, 0.0, static_cast<real>(pt.scale),
+                    static_cast<real>(pt.tx),    static_cast<real>(pt.ty),
+                };
+                spl = SplinePointListTransform(spl, transform, tpt_AllPoints);
+            }
+        }
+    }
+
     int importedContours = 0;
     SplineSet* tail = nullptr;
     for (SplineSet* s = spl; s != nullptr; s = s->next) {
@@ -1104,15 +1183,6 @@ bool FontForgeBridge::importSvgToGlyph(const SvgImportOptions& options, SvgImpor
     }
     if (options.roundToInt) {
         SCRound2Int(sc, activeLayer, 1.0);
-    }
-
-    if (options.updateAdvanceWidth && options.svgWidth > 0.0) {
-        const double rawWidth =
-            (options.scaleToEm && options.svgHeight > 0.0)
-                ? options.svgWidth * (static_cast<double>(emSize) / options.svgHeight)
-                : options.svgWidth;
-        sc->width = static_cast<int16_t>(std::clamp<long>(std::lround(rawWidth), 0L, 32767L));
-        sc->widthset = true;
     }
 
     sc->layers[activeLayer].validation_state = vs_unknown;

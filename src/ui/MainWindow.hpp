@@ -38,6 +38,7 @@ public:
 
 private slots:
     void onOpenFontClicked();
+    void onSaveFontClicked();
     void onExportFontClicked();
     void onCloseFontClicked();
     void onEditFontMetadataClicked();
@@ -71,6 +72,7 @@ private slots:
     void onSaveAreaConfigClicked();
     void onSearchTextChanged(const QString& text);
     void onZoomChanged(int value);
+    void onGridZoomStepsRequested(int steps);
     void onGlyphSelectionChanged();
     void onValidationGlyphSelected(int gid);
 
@@ -96,6 +98,7 @@ private:
     QDockWidget* m_validationDock = nullptr;
 
     QAction* m_openAction = nullptr;
+    QAction* m_saveAction = nullptr;
     QAction* m_exportAction = nullptr;
     QAction* m_closeAction = nullptr;
     QAction* m_fontMetaAction = nullptr;
@@ -123,6 +126,7 @@ private:
     bool m_updatingAreaUi = false;
     bool m_hasOpenFont = false;
     bool m_modified = false;
+    bool m_savingInPlace = false;
     bool m_openSvgAfterCreate = false;
 };
 

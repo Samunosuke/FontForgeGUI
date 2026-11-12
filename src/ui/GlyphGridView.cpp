@@ -10,6 +10,7 @@
 #include <QPalette>
 #include <QSet>
 #include <QUrl>
+#include <QWheelEvent>
 
 namespace ffgui {
 
@@ -125,6 +126,22 @@ void GlyphGridView::dropEvent(QDropEvent* event) {
 
     event->acceptProposedAction();
     emit fontFileDropped(path);
+}
+
+void GlyphGridView::wheelEvent(QWheelEvent* event) {
+    if (event->modifiers() & Qt::ControlModifier) {
+        const int deltaY = event->angleDelta().y();
+        if (deltaY != 0) {
+            int steps = deltaY / 120;
+            if (steps == 0) {
+                steps = (deltaY > 0) ? 1 : -1;
+            }
+            emit zoomStepsRequested(steps);
+        }
+        event->accept();
+        return;
+    }
+    QListView::wheelEvent(event);
 }
 
 void GlyphGridView::paintEvent(QPaintEvent* event) {

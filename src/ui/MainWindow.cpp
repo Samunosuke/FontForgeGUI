@@ -246,6 +246,8 @@ void MainWindow::setupUi() {
     connect(m_saveAreasBtn, &QPushButton::clicked, this, &MainWindow::onSaveAreaConfigClicked);
     connect(m_searchEdit, &QLineEdit::textChanged, this, &MainWindow::onSearchTextChanged);
     connect(m_zoomSlider, &QSlider::valueChanged, this, &MainWindow::onZoomChanged);
+    connect(m_gridView, &GlyphGridView::zoomStepsRequested, this,
+            &MainWindow::onGridZoomStepsRequested);
     connect(m_gridView->selectionModel(), &QItemSelectionModel::selectionChanged, this,
             &MainWindow::onGlyphSelectionChanged);
     connect(m_gridView, &GlyphGridView::fontFileDropped, this, &MainWindow::openFontPath);
@@ -278,6 +280,8 @@ void MainWindow::setupMenusAndToolbar() {
 
     m_openAction = fileMenu->addAction(tr("&Open Font…"), QKeySequence::Open, this,
                                        &MainWindow::onOpenFontClicked);
+    m_saveAction = fileMenu->addAction(tr("&Save Font"), QKeySequence::Save, this,
+                                       &MainWindow::onSaveFontClicked);
     m_exportAction = fileMenu->addAction(tr("&Export Font…"), QKeySequence(QStringLiteral("Ctrl+E")),
                                          this, &MainWindow::onExportFontClicked);
     m_closeAction = fileMenu->addAction(tr("&Close Font"), QKeySequence::Close, this,
@@ -288,7 +292,7 @@ void MainWindow::setupMenusAndToolbar() {
     auto* fontMenu = menuBar()->addMenu(tr("F&ont"));
     m_newGlyphAction = fontMenu->addAction(tr("&New Glyph…"), QKeySequence::New, this,
                                            &MainWindow::onNewGlyphClicked);
-    m_importSvgAction = fontMenu->addAction(tr("&Import SVG into Glyph…"),
+    m_importSvgAction = fontMenu->addAction(tr("&Import SVG / PNG into Glyph…"),
                                             QKeySequence(QStringLiteral("Ctrl+I")), this,
                                             &MainWindow::onImportSvgClicked);
     m_fontMetaAction = fontMenu->addAction(tr("Font &Metadata…"),
@@ -299,6 +303,13 @@ void MainWindow::setupMenusAndToolbar() {
                                            &MainWindow::onValidateFontClicked);
 
     auto* viewMenu = menuBar()->addMenu(tr("&View"));
+    viewMenu->addAction(tr("Zoom &In"), QKeySequence::ZoomIn, this,
+                        [this]() { onGridZoomStepsRequested(1); });
+    viewMenu->addAction(tr("Zoom &Out"), QKeySequence::ZoomOut, this,
+                        [this]() { onGridZoomStepsRequested(-1); });
+    viewMenu->addAction(tr("&Reset Zoom"), QKeySequence(QStringLiteral("Ctrl+0")), this,
+                        [this]() { m_zoomSlider->setValue(104); });
+    viewMenu->addSeparator();
     for (QDockWidget* dock : findChildren<QDockWidget*>()) {
         viewMenu->addAction(dock->toggleViewAction());
     }
@@ -306,6 +317,7 @@ void MainWindow::setupMenusAndToolbar() {
     auto* toolbar = addToolBar(tr("Main Toolbar"));
     toolbar->setMovable(false);
     toolbar->addAction(m_openAction);
+    toolbar->addAction(m_saveAction);
     toolbar->addAction(m_exportAction);
     toolbar->addAction(m_closeAction);
     toolbar->addSeparator();
@@ -314,6 +326,7 @@ void MainWindow::setupMenusAndToolbar() {
     toolbar->addAction(m_fontMetaAction);
     toolbar->addAction(m_validateAction);
 
+    m_saveAction->setEnabled(false);
     m_exportAction->setEnabled(false);
     m_closeAction->setEnabled(false);
     m_newGlyphAction->setEnabled(false);
@@ -342,6 +355,42 @@ void MainWindow::onOpenFontClicked() {
     }
 }
 
+void MainWindow::onSaveFontClicked() {
+    if (!m_hasOpenFont) {
+        return;
+    }
+    if (m_currentFontPath.isEmpty()) {
+        onExportFontClicked();
+        return;
+    }
+
+    const QFileInfo fi(m_currentFontPath);
+    const QString ext = fi.suffix().toLower();
+    static const QStringList kDirectWritableExts = {
+        QStringLiteral("sfd"),   QStringLiteral("ttf"),  QStringLiteral("otf"),
+        QStringLiteral("woff"),  QStringLiteral("woff2"), QStringLiteral("pfb"),
+        QStringLiteral("pfa"),   QStringLiteral("ufo"),  QStringLiteral("svg"),
+    };
+
+    if (!kDirectWritableExts.contains(ext)) {
+        onExportFontClicked();
+        return;
+    }
+
+    ExportOptions opts;
+    opts.outputPath = m_currentFontPath;
+    opts.roundToInt = true;
+    opts.opentypeTables = true;
+    opts.omitHints = false;
+    opts.dummyDsig = true;
+    opts.generateAfm = false;
+
+    m_savingInPlace = true;
+    setBusy(true, tr("Saving %1…").arg(fi.fileName()));
+    QMetaObject::invokeMethod(m_worker, "exportFont", Qt::QueuedConnection,
+                              Q_ARG(ffgui::ExportOptions, opts));
+}
+
 void MainWindow::onExportFontClicked() {
     if (!m_hasOpenFont) {
         return;
@@ -351,6 +400,7 @@ void MainWindow::onExportFontClicked() {
         return;
     }
     const ExportOptions opts = dlg.exportOptions();
+    m_savingInPlace = false;
     setBusy(true, tr("Exporting %1…").arg(QFileInfo(opts.outputPath).fileName()));
     QMetaObject::invokeMethod(m_worker, "exportFont", Qt::QueuedConnection,
                               Q_ARG(ffgui::ExportOptions, opts));
@@ -445,6 +495,7 @@ void MainWindow::onFontLoaded(const FontDocumentSnapshot& snapshot) {
     m_validationPanel->setFontAvailable(true);
     m_validationPanel->clear();
 
+    m_saveAction->setEnabled(true);
     m_exportAction->setEnabled(true);
     m_closeAction->setEnabled(true);
     m_newGlyphAction->setEnabled(true);
@@ -474,15 +525,30 @@ void MainWindow::onFontLoadFailed(const QString& error) {
 }
 
 void MainWindow::onFontExported(const QString& outputPath) {
+    const bool wasInPlace = m_savingInPlace ||
+        (!m_currentFontPath.isEmpty() &&
+         QFileInfo(outputPath).absoluteFilePath() == QFileInfo(m_currentFontPath).absoluteFilePath());
+    m_savingInPlace = false;
     setBusy(false);
-    statusBar()->showMessage(tr("Exported font to %1").arg(outputPath), 6000);
-    onLogMessage(QStringLiteral("info"), tr("Exported: %1").arg(outputPath));
+
+    if (wasInPlace) {
+        m_modified = false;
+        updateWindowTitleAndCounts();
+        statusBar()->showMessage(
+            tr("Saved %1").arg(QFileInfo(outputPath).fileName()), 5000);
+        onLogMessage(QStringLiteral("info"), tr("Saved: %1").arg(outputPath));
+    } else {
+        statusBar()->showMessage(tr("Exported font to %1").arg(outputPath), 6000);
+        onLogMessage(QStringLiteral("info"), tr("Exported: %1").arg(outputPath));
+    }
 }
 
 void MainWindow::onFontExportFailed(const QString& error) {
+    const bool wasInPlace = m_savingInPlace;
+    m_savingInPlace = false;
     setBusy(false);
-    QMessageBox::critical(this, tr("Export Failed"), error);
-    statusBar()->showMessage(tr("Font export failed"), 5000);
+    QMessageBox::critical(this, wasInPlace ? tr("Save Failed") : tr("Export Failed"), error);
+    statusBar()->showMessage(wasInPlace ? tr("Font save failed") : tr("Font export failed"), 5000);
 }
 
 void MainWindow::onGlyphCreated(const CreateGlyphResult& result) {
@@ -604,6 +670,7 @@ void MainWindow::onFontClosed() {
     m_gridView->setEmptyDropEnabled(true);
     m_inspector->clear();
     m_validationPanel->setFontAvailable(false);
+    m_saveAction->setEnabled(false);
     m_exportAction->setEnabled(false);
     m_closeAction->setEnabled(false);
     m_newGlyphAction->setEnabled(false);
@@ -711,6 +778,16 @@ void MainWindow::onZoomChanged(int value) {
     m_gridView->doItemsLayout();
 }
 
+void MainWindow::onGridZoomStepsRequested(int steps) {
+    if (steps == 0) {
+        return;
+    }
+    constexpr int kStepSize = 8;
+    const int target = std::clamp(m_zoomSlider->value() + steps * kStepSize,
+                                  m_zoomSlider->minimum(), m_zoomSlider->maximum());
+    m_zoomSlider->setValue(target);
+}
+
 void MainWindow::onGlyphSelectionChanged() {
     const GlyphSummary* g = currentSelectedGlyph();
     m_inspector->setGlyph(g);
@@ -733,6 +810,7 @@ void MainWindow::onValidationGlyphSelected(int gid) {
 
 void MainWindow::setBusy(bool busy, const QString& message) {
     m_openAction->setEnabled(!busy);
+    m_saveAction->setEnabled(!busy && m_hasOpenFont);
     m_exportAction->setEnabled(!busy && m_hasOpenFont);
     m_closeAction->setEnabled(!busy && m_hasOpenFont);
     m_newGlyphAction->setEnabled(!busy && m_hasOpenFont);
@@ -788,7 +866,7 @@ void MainWindow::applyCurrentAreaFilter() {
 
 void MainWindow::updateWindowTitleAndCounts() {
     if (!m_hasOpenFont) {
-        setWindowTitle(QStringLiteral("FontForgeGUI v0.3"));
+        setWindowTitle(QStringLiteral("FontForgeGUI v0.4"));
         m_countLabel->setText(tr("0 glyphs"));
         return;
     }
@@ -798,7 +876,7 @@ void MainWindow::updateWindowTitleAndCounts() {
                           : (!s.fontName.isEmpty() ? s.fontName
                                                    : QFileInfo(m_currentFontPath).fileName());
     const QString dirtyPrefix = m_modified ? QStringLiteral("* ") : QString();
-    setWindowTitle(QStringLiteral("%1%2 — FontForgeGUI v0.3").arg(dirtyPrefix, label));
+    setWindowTitle(QStringLiteral("%1%2 — FontForgeGUI v0.4").arg(dirtyPrefix, label));
     m_countLabel->setText(
         tr("Showing %1 / %2 glyphs").arg(m_model->filteredGlyphCount()).arg(m_model->totalGlyphCount()));
 }

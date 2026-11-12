@@ -104,6 +104,14 @@ struct FontValidationReport {
     QVector<GlyphValidationIssue> issues;
 };
 
+enum class GlyphPlacementMode {
+    AutoAspectRatio = 0, // Square/tall (W/H <= 1.25) on baseline y=0; wide (W/H > 1.25) vertically centered
+    BaselineCentered = 1, // Bottom on baseline (y = 0), horizontally centered in advance width
+    CenterInAscent = 2,   // Horizontally & vertically centered between baseline (0) and ascent
+    CenterInEm = 3,       // Horizontally & vertically centered in full EM box (-descent .. +ascent)
+    OriginalSvgCoords = 4 // Keep raw FontForge SVG coordinates
+};
+
 struct SvgImportOptions {
     int gid = -1;
     QByteArray svgData;
@@ -118,7 +126,99 @@ struct SvgImportOptions {
     bool updateAdvanceWidth = false;
     double svgWidth = 0.0;
     double svgHeight = 0.0;
+
+    GlyphPlacementMode placementMode = GlyphPlacementMode::AutoAspectRatio;
+    double scaleFactor = 1.0;  // Additional manual scale multiplier (1.0 = 100%)
+    double marginRatio = 0.04; // Default side/top padding ratio when fitting
+    double offsetX = 0.0;      // Manual X offset in font units
+    double offsetY = 0.0;      // Manual Y offset in font units
 };
+
+struct IconPlacementTransform {
+    double scale = 1.0;
+    double tx = 0.0;
+    double ty = 0.0;
+    bool isWideAspect = false;
+    double aspectRatio = 1.0;
+};
+
+inline IconPlacementTransform computeIconPlacement(double minX, double maxX, double minY,
+                                                   double maxY, double advanceWidth, int ascent,
+                                                   int descent, const SvgImportOptions& opts) {
+    IconPlacementTransform result;
+    const double w = maxX - minX;
+    const double h = maxY - minY;
+    if (w <= 1e-6 || h <= 1e-6) {
+        return result;
+    }
+
+    result.aspectRatio = w / h;
+    result.isWideAspect = (result.aspectRatio > 1.25);
+
+    const double userScale = (opts.scaleFactor > 0.01) ? opts.scaleFactor : 1.0;
+    if (opts.placementMode == GlyphPlacementMode::OriginalSvgCoords) {
+        const double cx = minX + w * 0.5;
+        const double cy = minY + h * 0.5;
+        result.scale = userScale;
+        result.tx = (cx - cx * userScale) + opts.offsetX;
+        result.ty = (cy - cy * userScale) + opts.offsetY;
+        return result;
+    }
+
+    const double emSize = static_cast<double>((ascent + descent) > 0 ? (ascent + descent) : 1000);
+    const double effAscent = (ascent > 0) ? static_cast<double>(ascent) : emSize * 0.8;
+    const double effDescent = (descent >= 0) ? static_cast<double>(descent) : emSize * 0.2;
+    const double availWidth = (advanceWidth > 0.0) ? advanceWidth : emSize;
+    const double margin = (opts.marginRatio >= 0.0 && opts.marginRatio < 0.45) ? opts.marginRatio : 0.04;
+
+    GlyphPlacementMode effectiveMode = opts.placementMode;
+    if (effectiveMode == GlyphPlacementMode::AutoAspectRatio) {
+        effectiveMode = result.isWideAspect ? GlyphPlacementMode::CenterInAscent
+                                            : GlyphPlacementMode::BaselineCentered;
+    }
+
+    double baseScale = 1.0;
+    if (opts.scaleToEm) {
+        const double boxW = availWidth * (1.0 - 2.0 * margin);
+        double boxH = effAscent * (1.0 - margin);
+        if (effectiveMode == GlyphPlacementMode::CenterInAscent) {
+            boxH = effAscent * (1.0 - 2.0 * margin);
+        } else if (effectiveMode == GlyphPlacementMode::CenterInEm) {
+            boxH = emSize * (1.0 - 2.0 * margin);
+        }
+        if (boxW > 1.0 && boxH > 1.0) {
+            const double sx = boxW / w;
+            const double sy = boxH / h;
+            baseScale = (sx < sy) ? sx : sy;
+        }
+    }
+
+    result.scale = baseScale * userScale;
+    const double sw = w * result.scale;
+    const double sh = h * result.scale;
+
+    const double targetMinX = (availWidth - sw) * 0.5 + opts.offsetX;
+    double targetMinY = 0.0;
+    switch (effectiveMode) {
+    case GlyphPlacementMode::BaselineCentered:
+        targetMinY = 0.0;
+        break;
+    case GlyphPlacementMode::CenterInAscent:
+        targetMinY = (effAscent - sh) * 0.5;
+        break;
+    case GlyphPlacementMode::CenterInEm:
+        targetMinY = -effDescent + (emSize - sh) * 0.5;
+        break;
+    default:
+        targetMinY = 0.0;
+        break;
+    }
+    targetMinY += opts.offsetY;
+
+    result.tx = targetMinX - minX * result.scale;
+    result.ty = targetMinY - minY * result.scale;
+    return result;
+}
 
 struct SvgImportResult {
     GlyphSummary glyph;

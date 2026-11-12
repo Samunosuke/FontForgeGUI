@@ -20,12 +20,14 @@ public:
 
 signals:
     void fontFileDropped(const QString& path);
+    void zoomStepsRequested(int steps);
 
 protected:
     void dragEnterEvent(QDragEnterEvent* event) override;
     void dragMoveEvent(QDragMoveEvent* event) override;
     void dragLeaveEvent(QDragLeaveEvent* event) override;
     void dropEvent(QDropEvent* event) override;
+    void wheelEvent(QWheelEvent* event) override;
     void paintEvent(QPaintEvent* event) override;
 
 private:

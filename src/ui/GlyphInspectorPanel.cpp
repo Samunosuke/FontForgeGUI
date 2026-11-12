@@ -148,8 +148,8 @@ GlyphInspectorPanel::GlyphInspectorPanel(QWidget* parent) : QWidget(parent) {
     auto* btnRow = new QHBoxLayout();
     m_applyBtn = new QPushButton(tr("Apply"), glyphGroup);
     m_revertBtn = new QPushButton(tr("Revert"), glyphGroup);
-    m_importSvgBtn = new QPushButton(tr("Import SVG…"), glyphGroup);
-    m_importSvgBtn->setToolTip(tr("Filter and import vector contours from an SVG file"));
+    m_importSvgBtn = new QPushButton(tr("Import SVG / PNG…"), glyphGroup);
+    m_importSvgBtn->setToolTip(tr("Filter or trace contours from an SVG or PNG icon file"));
     m_importSvgBtn->setEnabled(false);
     btnRow->addWidget(m_applyBtn);
     btnRow->addWidget(m_revertBtn);

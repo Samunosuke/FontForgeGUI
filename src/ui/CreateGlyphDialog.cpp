@@ -67,7 +67,7 @@ CreateGlyphDialog::CreateGlyphDialog(const FontSummary& summary, QWidget* parent
     root->addLayout(form);
 
     m_openSvgCheck = new QCheckBox(
-        tr("Open \"Import SVG…\" dialog after creating glyph"), this);
+        tr("Open \"Import SVG / PNG…\" dialog after creating glyph"), this);
     root->addWidget(m_openSvgCheck);
 
     m_errorLabel = new QLabel(this);

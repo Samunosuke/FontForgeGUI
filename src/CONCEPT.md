@@ -44,8 +44,9 @@ The UI is designed to be simple and easy to use.
 - [x] **Glyph & Font metadata editors (`v0.2`):** Edit `SplineChar` (`name`, `unicodeenc`, `altuni`) inline in `GlyphInspectorPanel` (sharing validation/formatting via `GlyphMetadataUtils`) and `SplineFont` (`fontname`, `familyname`, `fullname`, `weight`, `version`, `copyright`, `ascent`, `descent`, `italicangle`, `upos`, `uwidth`, SFNT `name` table) via `FontMetadataDialog` on `FontWorker`
 - [x] **Create New Glyph (`v0.3`):** `CreateGlyphDialog` (reusing `GlyphMetadataUtils`: Name, Unicode, Alt Unicodes, Advance Width, plus option to open `ImportSvgDialog` directly after creation) wired to `FontForgeBridge::createGlyph` (`SFMakeChar` / `SFSplineCharCreate` + `SFAddGlyphAndEncode`)
 - [x] **SVG filter & import (`v0.3`):** `SvgSanitizer` (strips editor metadata, hidden/empty nodes, background rects, tiny specks, excludes colors or flattens to `#000000`, extracts strokes and `#ffffff` foreground cutouts) + `ImportSvgDialog` (Original vs. Filtered preview, SVG Drag & Drop, persistent last folder via `QSettings`) + `FontForgeBridge::importSvgToGlyph` (`SplinePointListInterpretSVG` / stroke expansion / overlap removal / cutout subtraction / direction correction)
-- [ ] **Icon image import & trace (optional / deferred):** Grayscale/threshold preview + `potrace` / tracing pipeline into glyph contours
-- [ ] **Font editing / outline editor (`v0.4`):** Interactive `QGraphicsView` canvas mapping Bézier anchors/control handles directly to `SplinePoint`/`SplineSet` mutations on `FontWorker`
+- [x] **Icon image import & trace (`v0.4`):** In-memory PNG contour tracer (`BitmapTracer`: alpha/luminance thresholding, despeckling, Marching Squares boundary & hole extraction, Ramer–Douglas–Peucker simplification, corner-preserving cubic Bézier smoothing) integrated directly into `ImportSvgDialog`
+- [x] **Aspect-ratio & manual icon placement (`v0.4`):** Automatic aspect-ratio positioning (`W/H <= 1.25` resting on baseline `y = 0`, `W/H > 1.25` vertically centered in ascent) + interactive `GlyphPlacementPreviewWidget` (drag to offset, wheel to scale, metric guides) + `SplinePointListTransform` in `FontForgeBridge::importSvgToGlyph`
+- [ ] **Font editing / outline editor (`v0.5`):** Interactive `QGraphicsView` canvas mapping Bézier anchors/control handles directly to `SplinePoint`/`SplineSet` mutations on `FontWorker`
 
 ### Milestones
 
@@ -65,5 +66,25 @@ The UI is designed to be simple and easy to use.
 - [x] Drag & Drop loading of font files in empty glyph area (`GlyphGridView`)
 - [x] Create New Glyph (`CreateGlyphDialog`: Unicode, Name, Alt Unicodes, Advance Width, optional post-create SVG import)
 
-#### v0.4
-- [ ] Edit Glyph outline (simple and easy to use editor)
+#### v0.4 (Implemented)
+- [x] Save function with shortcut “CTRL+S“ to the original file
+- [x] Icon positioning during import (should be centered or on the refernce line depending on width/height ratio)
+- [x] Zoom in and out on Glyph area (same function as “Cell Size slider”)
+- [x] Manual positioning screen/control during SVG import
+- [x] PNG import function - check how complex this would be? (draw the contours of the PNG) 
+
+#### v0.5
+- [ ] Move glyphs function (if active, multiple glyphs can be selected and moved to a specific code point - given by unicode position or HEX number) - with warning if code points are not free
+- [ ] Add Supplementary Private Use Area-A (SPUA-A): U+F0000 – U+FFFFD (as a selectable range)
+- [ ] Add Supplementary Private Use Area-B (SPUA-B): U+100000 – U+10FFFD (as a selectable range)
+- [ ] Command line / shell parameters 
+      - (optional) inputFontFile
+      - (optional) outputFontFile (if no output file is given, it will not be saved automatically if input files are given, if just inputFontFile is given, it will open the font)
+      - (optional) startCodePoint - required if glyphs should get imported
+      - (optional) gyphInputImages (directory or multiple files which will get imported)
+      - (optional) glyph import parameters (used for SVGs, PNGs import filter)
+      - (optional) import definition file in JSON format (where each glyph to import can be defined with code point, name, image file, filter parameters, the JSON should also allow to define a default import filter param set)
+- [ ] Batch import of SVGs or PNGs (where unicode start point is defined beforehand, override mode / stopps with error if code points occupied ) - should be later also be called by command line or shell
+
+#### v0.6
+- [ ] Edit Glyph outline and vectors (simple and easy to use graphical editor)

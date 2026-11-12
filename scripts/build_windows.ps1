@@ -205,6 +205,13 @@ function Deploy-RuntimeDependencies {
 Deploy-RuntimeDependencies -TargetDir $FullBuildDir
 
 if (-not $SkipTests) {
+    # Ensure Qt offscreen platform plugin is present in build-win\platforms for headless CTest runs
+    $qoffscreenSrc = Join-Path $Msys2Root "ucrt64\share\qt6\plugins\platforms\qoffscreen.dll"
+    $platformsDst = Join-Path $FullBuildDir "platforms"
+    if ((Test-Path $qoffscreenSrc) -and (Test-Path $platformsDst)) {
+        Copy-Item -Path $qoffscreenSrc -Destination $platformsDst -Force
+    }
+
     $env:QT_QPA_PLATFORM = "offscreen"
     Invoke-Checked "Running CTest suite" {
         & ctest --test-dir $FullBuildDir --output-on-failure
