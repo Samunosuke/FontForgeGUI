@@ -64,6 +64,7 @@ struct ExportOptions {
     bool omitHints = false;
     bool dummyDsig = true;
     bool generateAfm = false;
+    bool isSaveAs = false;
 };
 
 struct GlyphMetadataUpdate {
@@ -235,6 +236,51 @@ struct CreateGlyphRequest {
 struct CreateGlyphResult {
     GlyphSummary glyph;
     FontSummary fontSummary;
+};
+
+struct NewFontOptions {
+    QString fontName = QStringLiteral("Untitled");
+    QString familyName = QStringLiteral("Untitled");
+    QString fullName = QStringLiteral("Untitled");
+    QString weight = QStringLiteral("Regular");
+    QString version = QStringLiteral("1.0");
+    QString copyright;
+    int ascent = 800;
+    int descent = 200;
+    int emSize = 1000;
+};
+
+struct MoveGlyphsRequest {
+    QList<int> gids;
+    int32_t targetStartUnicode = -1;
+    bool overwriteOccupied = false;
+};
+
+struct MoveGlyphsResult {
+    int movedCount = 0;
+    QVector<GlyphSummary> updatedGlyphs;
+};
+
+struct BatchImportItem {
+    QString filePath;
+    int32_t unicode = -1;
+    QString glyphName;
+    SvgImportOptions customOptions;
+    bool hasCustomOptions = false;
+};
+
+struct BatchImportJob {
+    QVector<BatchImportItem> items;
+    SvgImportOptions defaultOptions;
+    bool overwriteExisting = false;
+};
+
+struct BatchImportResult {
+    int importedCount = 0;
+    int skippedCount = 0;
+    QStringList errors;
+    FontSummary updatedFontSummary;
+    QVector<GlyphSummary> updatedGlyphs;
 };
 
 } // namespace ffgui

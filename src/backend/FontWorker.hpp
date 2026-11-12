@@ -22,13 +22,16 @@ public:
 
 public slots:
     void initialize();
+    void createNewFont(const ffgui::NewFontOptions& options);
     void openFont(const QString& path);
     void exportFont(const ExportOptions& options);
     void updateGlyphMetadata(const GlyphMetadataUpdate& update);
+    void moveGlyphs(const ffgui::MoveGlyphsRequest& request);
     void createGlyph(const CreateGlyphRequest& request);
     void updateFontMetadata(const FontMetadataUpdate& update);
     void validateFont(bool force);
     void importSvgToGlyph(const SvgImportOptions& options);
+    void batchImport(const ffgui::BatchImportJob& job);
     void closeFont();
 
 signals:
@@ -38,6 +41,8 @@ signals:
     void fontExportFailed(const QString& error);
     void glyphMetadataUpdated(const ffgui::GlyphSummary& glyph);
     void glyphMetadataUpdateFailed(const QString& error);
+    void glyphsMoved(const ffgui::MoveGlyphsResult& result);
+    void glyphsMoveFailed(const QString& error);
     void glyphCreated(const ffgui::CreateGlyphResult& result);
     void glyphCreationFailed(const QString& error);
     void fontMetadataUpdated(const ffgui::FontSummary& summary);
@@ -46,6 +51,8 @@ signals:
     void fontValidationFailed(const QString& error);
     void svgImported(const ffgui::SvgImportResult& result);
     void svgImportFailed(const QString& error);
+    void batchImportCompleted(const ffgui::BatchImportResult& result);
+    void batchImportFailed(const QString& error);
     void fontClosed();
     void logMessage(const QString& level, const QString& message);
     void progressUpdated(int current, int total, const QString& status);

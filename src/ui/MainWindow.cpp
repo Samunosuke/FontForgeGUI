@@ -1,8 +1,10 @@
 #include "ui/MainWindow.hpp"
 
 #include "backend/FontWorker.hpp"
+#include "model/FontSettingsUtils.hpp"
 #include "model/GlyphListModel.hpp"
 #include "model/UnicodeRangeFilter.hpp"
+#include "ui/BatchImportDialog.hpp"
 #include "ui/CreateGlyphDialog.hpp"
 #include "ui/ExportFontDialog.hpp"
 #include "ui/FontMetadataDialog.hpp"
@@ -10,6 +12,8 @@
 #include "ui/GlyphGridView.hpp"
 #include "ui/GlyphInspectorPanel.hpp"
 #include "ui/ImportSvgDialog.hpp"
+#include "ui/MoveGlyphsDialog.hpp"
+#include "ui/NewFontDialog.hpp"
 #include "ui/ValidationPanel.hpp"
 
 #include <QAction>
@@ -50,6 +54,11 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     qRegisterMetaType<SvgImportResult>("ffgui::SvgImportResult");
     qRegisterMetaType<CreateGlyphRequest>("ffgui::CreateGlyphRequest");
     qRegisterMetaType<CreateGlyphResult>("ffgui::CreateGlyphResult");
+    qRegisterMetaType<NewFontOptions>("ffgui::NewFontOptions");
+    qRegisterMetaType<MoveGlyphsRequest>("ffgui::MoveGlyphsRequest");
+    qRegisterMetaType<MoveGlyphsResult>("ffgui::MoveGlyphsResult");
+    qRegisterMetaType<BatchImportJob>("ffgui::BatchImportJob");
+    qRegisterMetaType<BatchImportResult>("ffgui::BatchImportResult");
 
     m_areaConfig = CustomGlyphAreaConfig::createDefault();
 
@@ -70,6 +79,8 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     connect(m_worker, &FontWorker::fontExportFailed, this, &MainWindow::onFontExportFailed);
     connect(m_worker, &FontWorker::glyphCreated, this, &MainWindow::onGlyphCreated);
     connect(m_worker, &FontWorker::glyphCreationFailed, this, &MainWindow::onGlyphCreationFailed);
+    connect(m_worker, &FontWorker::glyphsMoved, this, &MainWindow::onGlyphsMoved);
+    connect(m_worker, &FontWorker::glyphsMoveFailed, this, &MainWindow::onGlyphsMoveFailed);
     connect(m_worker, &FontWorker::glyphMetadataUpdated, this,
             &MainWindow::onGlyphMetadataUpdated);
     connect(m_worker, &FontWorker::glyphMetadataUpdateFailed, this,
@@ -82,6 +93,8 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
             &MainWindow::onFontValidationFailed);
     connect(m_worker, &FontWorker::svgImported, this, &MainWindow::onSvgImported);
     connect(m_worker, &FontWorker::svgImportFailed, this, &MainWindow::onSvgImportFailed);
+    connect(m_worker, &FontWorker::batchImportCompleted, this, &MainWindow::onBatchImportCompleted);
+    connect(m_worker, &FontWorker::batchImportFailed, this, &MainWindow::onBatchImportFailed);
     connect(m_worker, &FontWorker::fontClosed, this, &MainWindow::onFontClosed);
     connect(m_worker, &FontWorker::logMessage, this, &MainWindow::onLogMessage);
     connect(m_worker, &FontWorker::progressUpdated, this, &MainWindow::onProgressUpdated);
@@ -195,7 +208,7 @@ void MainWindow::setupUi() {
     m_gridView->setMovement(QListView::Static);
     m_gridView->setUniformItemSizes(true);
     m_gridView->setSpacing(4);
-    m_gridView->setSelectionMode(QAbstractItemView::SingleSelection);
+    m_gridView->setSelectionMode(QAbstractItemView::ExtendedSelection);
     m_gridView->setMouseTracking(true);
     m_gridView->setEmptyDropEnabled(true);
 
@@ -278,10 +291,15 @@ void MainWindow::setupUi() {
 void MainWindow::setupMenusAndToolbar() {
     auto* fileMenu = menuBar()->addMenu(tr("&File"));
 
+    m_newFontAction = fileMenu->addAction(tr("&New Font…"), QKeySequence::New, this,
+                                         &MainWindow::onNewFontClicked);
     m_openAction = fileMenu->addAction(tr("&Open Font…"), QKeySequence::Open, this,
                                        &MainWindow::onOpenFontClicked);
     m_saveAction = fileMenu->addAction(tr("&Save Font"), QKeySequence::Save, this,
                                        &MainWindow::onSaveFontClicked);
+    m_saveAsAction = fileMenu->addAction(tr("Save Font &As…"),
+                                         QKeySequence(QStringLiteral("Ctrl+Shift+S")), this,
+                                         &MainWindow::onSaveFontAsClicked);
     m_exportAction = fileMenu->addAction(tr("&Export Font…"), QKeySequence(QStringLiteral("Ctrl+E")),
                                          this, &MainWindow::onExportFontClicked);
     m_closeAction = fileMenu->addAction(tr("&Close Font"), QKeySequence::Close, this,
@@ -290,11 +308,17 @@ void MainWindow::setupMenusAndToolbar() {
     fileMenu->addAction(tr("E&xit"), QKeySequence::Quit, this, &QWidget::close);
 
     auto* fontMenu = menuBar()->addMenu(tr("F&ont"));
-    m_newGlyphAction = fontMenu->addAction(tr("&New Glyph…"), QKeySequence::New, this,
+    m_newGlyphAction = fontMenu->addAction(tr("&New Glyph…"), QKeySequence(QStringLiteral("Ctrl+Shift+N")), this,
                                            &MainWindow::onNewGlyphClicked);
+    m_moveGlyphsAction = fontMenu->addAction(tr("&Move Selected Glyphs…"),
+                                             QKeySequence(QStringLiteral("Ctrl+Shift+M")), this,
+                                             &MainWindow::onMoveGlyphsClicked);
     m_importSvgAction = fontMenu->addAction(tr("&Import SVG / PNG into Glyph…"),
                                             QKeySequence(QStringLiteral("Ctrl+I")), this,
                                             &MainWindow::onImportSvgClicked);
+    m_batchImportAction = fontMenu->addAction(tr("&Batch Import Images…"),
+                                              QKeySequence(QStringLiteral("Ctrl+Shift+B")), this,
+                                              &MainWindow::onBatchImportClicked);
     m_fontMetaAction = fontMenu->addAction(tr("Font &Metadata…"),
                                            QKeySequence(QStringLiteral("Ctrl+M")), this,
                                            &MainWindow::onEditFontMetadataClicked);
@@ -316,21 +340,27 @@ void MainWindow::setupMenusAndToolbar() {
 
     auto* toolbar = addToolBar(tr("Main Toolbar"));
     toolbar->setMovable(false);
+    toolbar->addAction(m_newFontAction);
     toolbar->addAction(m_openAction);
     toolbar->addAction(m_saveAction);
     toolbar->addAction(m_exportAction);
     toolbar->addAction(m_closeAction);
     toolbar->addSeparator();
     toolbar->addAction(m_newGlyphAction);
+    toolbar->addAction(m_moveGlyphsAction);
     toolbar->addAction(m_importSvgAction);
+    toolbar->addAction(m_batchImportAction);
     toolbar->addAction(m_fontMetaAction);
     toolbar->addAction(m_validateAction);
 
     m_saveAction->setEnabled(false);
+    m_saveAsAction->setEnabled(false);
     m_exportAction->setEnabled(false);
     m_closeAction->setEnabled(false);
     m_newGlyphAction->setEnabled(false);
+    m_moveGlyphsAction->setEnabled(false);
     m_importSvgAction->setEnabled(false);
+    m_batchImportAction->setEnabled(false);
     m_fontMetaAction->setEnabled(false);
     m_validateAction->setEnabled(false);
     m_saveAreasBtn->setEnabled(false);
@@ -340,8 +370,45 @@ void MainWindow::openFontPath(const QString& path) {
     if (path.isEmpty()) {
         return;
     }
+    saveLastFontDirectory(path);
     setBusy(true, tr("Loading %1…").arg(QFileInfo(path).fileName()));
     QMetaObject::invokeMethod(m_worker, "openFont", Qt::QueuedConnection, Q_ARG(QString, path));
+}
+
+void MainWindow::createNewFont(const ffgui::NewFontOptions& options) {
+    setBusy(true, tr("Creating new font %1…").arg(options.fontName));
+    QMetaObject::invokeMethod(m_worker, "createNewFont", Qt::QueuedConnection,
+                              Q_ARG(ffgui::NewFontOptions, options));
+}
+
+void MainWindow::openBatchImport(const QStringList& files, const QString& dir,
+                                 const QString& jsonDef) {
+    if (!m_hasOpenFont) {
+        return;
+    }
+    BatchImportDialog dlg(m_model->fontSummary(), m_model->allGlyphs(), this);
+    if (!jsonDef.isEmpty()) {
+        dlg.setInitialDefinitionFile(jsonDef);
+    } else if (!dir.isEmpty()) {
+        dlg.setInitialDirectory(dir);
+    } else if (!files.isEmpty()) {
+        dlg.setInitialFiles(files);
+    }
+    if (dlg.exec() != QDialog::Accepted) {
+        return;
+    }
+    const BatchImportJob job = dlg.batchJob();
+    setBusy(true, tr("Batch importing %1 item(s)…").arg(job.items.size()));
+    QMetaObject::invokeMethod(m_worker, "batchImport", Qt::QueuedConnection,
+                              Q_ARG(ffgui::BatchImportJob, job));
+}
+
+void MainWindow::onNewFontClicked() {
+    NewFontDialog dlg(this);
+    if (dlg.exec() != QDialog::Accepted) {
+        return;
+    }
+    createNewFont(dlg.fontOptions());
 }
 
 void MainWindow::onOpenFontClicked() {
@@ -349,7 +416,8 @@ void MainWindow::onOpenFontClicked() {
         tr("All Supported Fonts (*.ttf *.otf *.woff *.woff2 *.sfd *.pfb *.pfa *.ufo *.svg *.ttc);;"
            "OpenType / TrueType (*.otf *.ttf *.ttc);;Web Fonts (*.woff *.woff2);;"
            "FontForge Project (*.sfd);;All Files (*)");
-    const QString path = QFileDialog::getOpenFileName(this, tr("Open Font"), QString(), filter);
+    const QString defaultDir = loadLastFontDirectory();
+    const QString path = QFileDialog::getOpenFileName(this, tr("Open Font"), defaultDir, filter);
     if (!path.isEmpty()) {
         openFontPath(path);
     }
@@ -360,7 +428,7 @@ void MainWindow::onSaveFontClicked() {
         return;
     }
     if (m_currentFontPath.isEmpty()) {
-        onExportFontClicked();
+        onSaveFontAsClicked();
         return;
     }
 
@@ -373,7 +441,7 @@ void MainWindow::onSaveFontClicked() {
     };
 
     if (!kDirectWritableExts.contains(ext)) {
-        onExportFontClicked();
+        onSaveFontAsClicked();
         return;
     }
 
@@ -384,9 +452,28 @@ void MainWindow::onSaveFontClicked() {
     opts.omitHints = false;
     opts.dummyDsig = true;
     opts.generateAfm = false;
+    opts.isSaveAs = false;
 
     m_savingInPlace = true;
+    m_savingAs = false;
     setBusy(true, tr("Saving %1…").arg(fi.fileName()));
+    QMetaObject::invokeMethod(m_worker, "exportFont", Qt::QueuedConnection,
+                              Q_ARG(ffgui::ExportOptions, opts));
+}
+
+void MainWindow::onSaveFontAsClicked() {
+    if (!m_hasOpenFont) {
+        return;
+    }
+    ExportFontDialog dlg(m_model->fontSummary(), true, this);
+    if (dlg.exec() != QDialog::Accepted) {
+        return;
+    }
+    ExportOptions opts = dlg.exportOptions();
+    opts.isSaveAs = true;
+    m_savingInPlace = false;
+    m_savingAs = true;
+    setBusy(true, tr("Saving %1…").arg(QFileInfo(opts.outputPath).fileName()));
     QMetaObject::invokeMethod(m_worker, "exportFont", Qt::QueuedConnection,
                               Q_ARG(ffgui::ExportOptions, opts));
 }
@@ -395,12 +482,15 @@ void MainWindow::onExportFontClicked() {
     if (!m_hasOpenFont) {
         return;
     }
-    ExportFontDialog dlg(m_model->fontSummary(), this);
+    ExportFontDialog dlg(m_model->fontSummary(), false, this);
     if (dlg.exec() != QDialog::Accepted) {
         return;
     }
-    const ExportOptions opts = dlg.exportOptions();
+    ExportOptions opts = dlg.exportOptions();
+    const bool isInitialSaveForNewFont = m_currentFontPath.isEmpty();
+    opts.isSaveAs = isInitialSaveForNewFont;
     m_savingInPlace = false;
+    m_savingAs = isInitialSaveForNewFont;
     setBusy(true, tr("Exporting %1…").arg(QFileInfo(opts.outputPath).fileName()));
     QMetaObject::invokeMethod(m_worker, "exportFont", Qt::QueuedConnection,
                               Q_ARG(ffgui::ExportOptions, opts));
@@ -453,6 +543,33 @@ void MainWindow::onNewGlyphClicked() {
                               Q_ARG(ffgui::CreateGlyphRequest, req));
 }
 
+void MainWindow::onMoveGlyphsClicked() {
+    if (!m_hasOpenFont) {
+        return;
+    }
+    const QVector<GlyphSummary> sel = currentSelectedGlyphs();
+    if (sel.isEmpty()) {
+        QMessageBox::information(this, tr("Move Glyphs"),
+                                 tr("Please select one or more glyphs in the grid first."));
+        return;
+    }
+    MoveGlyphsDialog dlg(sel, m_model->fontSummary(), m_model->allGlyphs(), this);
+    if (dlg.exec() != QDialog::Accepted) {
+        return;
+    }
+    const MoveGlyphsRequest req = dlg.moveRequest();
+    setBusy(true, tr("Moving %1 glyph(s) to U+%2…")
+                      .arg(req.gids.size())
+                      .arg(req.targetStartUnicode, 4, 16, QLatin1Char('0'))
+                      .toUpper());
+    QMetaObject::invokeMethod(m_worker, "moveGlyphs", Qt::QueuedConnection,
+                              Q_ARG(ffgui::MoveGlyphsRequest, req));
+}
+
+void MainWindow::onBatchImportClicked() {
+    openBatchImport();
+}
+
 void MainWindow::onImportSvgClicked() {
     if (!m_hasOpenFont) {
         return;
@@ -496,9 +613,12 @@ void MainWindow::onFontLoaded(const FontDocumentSnapshot& snapshot) {
     m_validationPanel->clear();
 
     m_saveAction->setEnabled(true);
+    m_saveAsAction->setEnabled(true);
     m_exportAction->setEnabled(true);
     m_closeAction->setEnabled(true);
     m_newGlyphAction->setEnabled(true);
+    m_moveGlyphsAction->setEnabled(true);
+    m_batchImportAction->setEnabled(true);
     m_fontMetaAction->setEnabled(true);
     m_validateAction->setEnabled(true);
     m_saveAreasBtn->setEnabled(true);
@@ -525,15 +645,27 @@ void MainWindow::onFontLoadFailed(const QString& error) {
 }
 
 void MainWindow::onFontExported(const QString& outputPath) {
-    const bool wasInPlace = m_savingInPlace ||
+    const bool wasUnsavedNewFont = m_currentFontPath.isEmpty();
+    const bool wasSaveAction = m_savingInPlace || m_savingAs || wasUnsavedNewFont ||
         (!m_currentFontPath.isEmpty() &&
          QFileInfo(outputPath).absoluteFilePath() == QFileInfo(m_currentFontPath).absoluteFilePath());
     m_savingInPlace = false;
+    m_savingAs = false;
     setBusy(false);
 
-    if (wasInPlace) {
+    saveLastFontDirectory(outputPath);
+
+    if (wasSaveAction) {
+        m_currentFontPath = outputPath;
         m_modified = false;
+
+        FontSummary updatedSummary = m_model->fontSummary();
+        updatedSummary.filePath = outputPath;
+        m_model->setFontSummary(updatedSummary);
+        m_inspector->setFontSummary(updatedSummary);
+
         updateWindowTitleAndCounts();
+        persistAreaConfigIfOpen(false);
         statusBar()->showMessage(
             tr("Saved %1").arg(QFileInfo(outputPath).fileName()), 5000);
         onLogMessage(QStringLiteral("info"), tr("Saved: %1").arg(outputPath));
@@ -544,11 +676,12 @@ void MainWindow::onFontExported(const QString& outputPath) {
 }
 
 void MainWindow::onFontExportFailed(const QString& error) {
-    const bool wasInPlace = m_savingInPlace;
+    const bool wasSaveAction = m_savingInPlace || m_savingAs;
     m_savingInPlace = false;
+    m_savingAs = false;
     setBusy(false);
-    QMessageBox::critical(this, wasInPlace ? tr("Save Failed") : tr("Export Failed"), error);
-    statusBar()->showMessage(wasInPlace ? tr("Font save failed") : tr("Font export failed"), 5000);
+    QMessageBox::critical(this, wasSaveAction ? tr("Save Failed") : tr("Export Failed"), error);
+    statusBar()->showMessage(wasSaveAction ? tr("Font save failed") : tr("Font export failed"), 5000);
 }
 
 void MainWindow::onGlyphCreated(const CreateGlyphResult& result) {
@@ -593,6 +726,52 @@ void MainWindow::onGlyphCreationFailed(const QString& error) {
     setBusy(false);
     QMessageBox::warning(this, tr("Create Glyph Failed"), error);
     statusBar()->showMessage(tr("Glyph creation failed"), 4000);
+}
+
+void MainWindow::onGlyphsMoved(const ffgui::MoveGlyphsResult& result) {
+    setBusy(false);
+    m_modified = true;
+    for (const auto& g : result.updatedGlyphs) {
+        m_model->updateGlyph(g);
+    }
+    onGlyphSelectionChanged();
+    updateWindowTitleAndCounts();
+    statusBar()->showMessage(tr("Successfully moved %1 glyph(s)").arg(result.movedCount), 5000);
+}
+
+void MainWindow::onGlyphsMoveFailed(const QString& error) {
+    setBusy(false);
+    QMessageBox::warning(this, tr("Move Glyphs Failed"), error);
+    statusBar()->showMessage(tr("Move glyphs failed"), 4000);
+}
+
+void MainWindow::onBatchImportCompleted(const ffgui::BatchImportResult& result) {
+    setBusy(false);
+    m_modified = true;
+    for (const auto& g : result.updatedGlyphs) {
+        m_model->updateGlyph(g);
+    }
+    m_model->setFontSummary(result.updatedFontSummary);
+    m_inspector->setFontSummary(result.updatedFontSummary);
+    onGlyphSelectionChanged();
+    updateWindowTitleAndCounts();
+
+    if (!result.errors.isEmpty()) {
+        QMessageBox::warning(
+            this, tr("Batch Import Completed with Warnings"),
+            tr("Imported %1 file(s). %2 file(s) skipped:\n%3")
+                .arg(result.importedCount)
+                .arg(result.skippedCount)
+                .arg(result.errors.join(QStringLiteral("\n"))));
+    } else {
+        statusBar()->showMessage(tr("Batch imported %1 file(s) successfully").arg(result.importedCount), 6000);
+    }
+}
+
+void MainWindow::onBatchImportFailed(const QString& error) {
+    setBusy(false);
+    QMessageBox::warning(this, tr("Batch Import Failed"), error);
+    statusBar()->showMessage(tr("Batch import failed"), 4000);
 }
 
 void MainWindow::onGlyphMetadataUpdated(const GlyphSummary& glyph) {
@@ -671,10 +850,13 @@ void MainWindow::onFontClosed() {
     m_inspector->clear();
     m_validationPanel->setFontAvailable(false);
     m_saveAction->setEnabled(false);
+    m_saveAsAction->setEnabled(false);
     m_exportAction->setEnabled(false);
     m_closeAction->setEnabled(false);
     m_newGlyphAction->setEnabled(false);
+    m_moveGlyphsAction->setEnabled(false);
     m_importSvgAction->setEnabled(false);
+    m_batchImportAction->setEnabled(false);
     m_fontMetaAction->setEnabled(false);
     m_validateAction->setEnabled(false);
     m_saveAreasBtn->setEnabled(false);
@@ -792,6 +974,7 @@ void MainWindow::onGlyphSelectionChanged() {
     const GlyphSummary* g = currentSelectedGlyph();
     m_inspector->setGlyph(g);
     m_importSvgAction->setEnabled(m_hasOpenFont && g != nullptr);
+    m_moveGlyphsAction->setEnabled(m_hasOpenFont && !currentSelectedGlyphs().isEmpty());
 }
 
 void MainWindow::onValidationGlyphSelected(int gid) {
@@ -810,10 +993,14 @@ void MainWindow::onValidationGlyphSelected(int gid) {
 
 void MainWindow::setBusy(bool busy, const QString& message) {
     m_openAction->setEnabled(!busy);
+    m_newFontAction->setEnabled(!busy);
     m_saveAction->setEnabled(!busy && m_hasOpenFont);
+    m_saveAsAction->setEnabled(!busy && m_hasOpenFont);
     m_exportAction->setEnabled(!busy && m_hasOpenFont);
     m_closeAction->setEnabled(!busy && m_hasOpenFont);
     m_newGlyphAction->setEnabled(!busy && m_hasOpenFont);
+    m_moveGlyphsAction->setEnabled(!busy && m_hasOpenFont && !currentSelectedGlyphs().isEmpty());
+    m_batchImportAction->setEnabled(!busy && m_hasOpenFont);
     m_importSvgAction->setEnabled(!busy && m_hasOpenFont && currentSelectedGlyph() != nullptr);
     m_fontMetaAction->setEnabled(!busy && m_hasOpenFont);
     m_validateAction->setEnabled(!busy && m_hasOpenFont);
@@ -866,7 +1053,7 @@ void MainWindow::applyCurrentAreaFilter() {
 
 void MainWindow::updateWindowTitleAndCounts() {
     if (!m_hasOpenFont) {
-        setWindowTitle(QStringLiteral("FontForgeGUI v0.4"));
+        setWindowTitle(QStringLiteral("FontForgeGUI v0.5"));
         m_countLabel->setText(tr("0 glyphs"));
         return;
     }
@@ -876,7 +1063,7 @@ void MainWindow::updateWindowTitleAndCounts() {
                           : (!s.fontName.isEmpty() ? s.fontName
                                                    : QFileInfo(m_currentFontPath).fileName());
     const QString dirtyPrefix = m_modified ? QStringLiteral("* ") : QString();
-    setWindowTitle(QStringLiteral("%1%2 — FontForgeGUI v0.4").arg(dirtyPrefix, label));
+    setWindowTitle(QStringLiteral("%1%2 — FontForgeGUI v0.5").arg(dirtyPrefix, label));
     m_countLabel->setText(
         tr("Showing %1 / %2 glyphs").arg(m_model->filteredGlyphCount()).arg(m_model->totalGlyphCount()));
 }
@@ -905,6 +1092,20 @@ const GlyphSummary* MainWindow::currentSelectedGlyph() const {
         }
     }
     return m_inspector ? m_inspector->currentGlyph() : nullptr;
+}
+
+QVector<GlyphSummary> MainWindow::currentSelectedGlyphs() const {
+    QVector<GlyphSummary> out;
+    if (m_gridView && m_gridView->selectionModel()) {
+        const QModelIndexList selected = m_gridView->selectionModel()->selectedIndexes();
+        for (const auto& idx : selected) {
+            const GlyphSummary* g = m_model->glyphAtRow(idx.row());
+            if (g != nullptr) {
+                out.append(*g);
+            }
+        }
+    }
+    return out;
 }
 
 void MainWindow::persistAreaConfigIfOpen(bool showStatus) {

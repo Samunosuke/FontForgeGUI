@@ -99,8 +99,8 @@ QVector<UnicodeRangePreset> UnicodeRangeFilter::defaultPresets() {
         {QStringLiteral("Latin-1 Supplement (U+00A0–00FF)"), QStringLiteral("U+00A0-00FF"), false},
         {QStringLiteral("Latin Extended-A (U+0100–017F)"), QStringLiteral("U+0100-017F"), false},
         {QStringLiteral("Icons / PUA (U+E000–F8FF)"), QStringLiteral("U+E000-F8FF"), false},
-        {QStringLiteral("Private Use Plane 15 (U+F0000–FFFFD)"), QStringLiteral("U+F0000-FFFFD"),
-         false},
+        {QStringLiteral("SPUA-A (U+F0000–FFFFD)"), QStringLiteral("U+F0000-FFFFD"), false},
+        {QStringLiteral("SPUA-B (U+100000–10FFFD)"), QStringLiteral("U+100000-10FFFD"), false},
     };
 }
 

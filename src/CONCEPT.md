@@ -73,18 +73,23 @@ The UI is designed to be simple and easy to use.
 - [x] Manual positioning screen/control during SVG import
 - [x] PNG import function - check how complex this would be? (draw the contours of the PNG) 
 
-#### v0.5
-- [ ] Move glyphs function (if active, multiple glyphs can be selected and moved to a specific code point - given by unicode position or HEX number) - with warning if code points are not free
-- [ ] Add Supplementary Private Use Area-A (SPUA-A): U+F0000 – U+FFFFD (as a selectable range)
-- [ ] Add Supplementary Private Use Area-B (SPUA-B): U+100000 – U+10FFFD (as a selectable range)
-- [ ] Command line / shell parameters 
-      - (optional) inputFontFile
-      - (optional) outputFontFile (if no output file is given, it will not be saved automatically if input files are given, if just inputFontFile is given, it will open the font)
-      - (optional) startCodePoint - required if glyphs should get imported
+#### v0.5 (Implemented)
+- [x] Create New Font (initialize a new empty font in memory with customizable metadata, Ascent/Descent, and EM size)
+- [x] Move glyphs function (if active, multiple glyphs can be selected and moved to a specific code point - given by unicode position or HEX number) - with warning if code points are not free
+- [x] Add Supplementary Private Use Area-A (SPUA-A): U+F0000 – U+FFFFD (as a selectable range)
+- [x] Add Supplementary Private Use Area-B (SPUA-B): U+100000 – U+10FFFD (as a selectable range)
+- [x] Command line / shell parameters 
+      - (optional) inputFontFile (if omitted but outputFontFile is given, a new font is created automatically)
+      - (optional) outputFontFile (if no output file is given, it will not be saved automatically if input files are given, if just inputFontFile is given, it will open the font in GUI)
+      - (optional) --headless / --gui (run batch operations headless without windows or open in GUI mode with confirmation dialogs)
+      - (optional) startCodePoint - required if glyphs should get imported without JSON definition
       - (optional) gyphInputImages (directory or multiple files which will get imported)
       - (optional) glyph import parameters (used for SVGs, PNGs import filter)
       - (optional) import definition file in JSON format (where each glyph to import can be defined with code point, name, image file, filter parameters, the JSON should also allow to define a default import filter param set)
-- [ ] Batch import of SVGs or PNGs (where unicode start point is defined beforehand, override mode / stopps with error if code points occupied ) - should be later also be called by command line or shell
+- [x] Batch import of SVGs or PNGs (where unicode start point is defined beforehand, override mode / stopps with error if code points occupied ) - should be later also be called by command line or shell
+
+#### v0.5.1
+- [ ] Improve batch import (allow to set all default import parameters - this important when the batch import is startet from GUI) 
 
 #### v0.6
 - [ ] Edit Glyph outline and vectors (simple and easy to use graphical editor)

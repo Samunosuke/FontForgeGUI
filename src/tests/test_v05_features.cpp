@@ -1,0 +1,170 @@
+#include "backend/FontForgeBridge.hpp"
+#include "model/BatchImportDefinition.hpp"
+#include "model/UnicodeRangeFilter.hpp"
+
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
+#include <QGuiApplication>
+#include <QImage>
+#include <QPainter>
+#include <QTemporaryDir>
+
+#include <cstdio>
+#include <cstdlib>
+
+#define CHECK(expr)                                                                     \
+    do {                                                                                \
+        if (!(expr)) {                                                                  \
+            std::fprintf(stderr, "CHECK failed at %s:%d: %s\n", __FILE__, __LINE__,     \
+                         #expr);                                                        \
+            return 1;                                                                   \
+        }                                                                               \
+    } while (0)
+
+using namespace ffgui;
+
+int main(int argc, char* argv[]) {
+    QGuiApplication app(argc, argv);
+
+    QTemporaryDir tempDir;
+    CHECK(tempDir.isValid());
+
+    FontForgeBridge bridge;
+    bridge.initialize();
+
+    // -------------------------------------------------------------------------
+    // 1. Create New Blank Font & SPUA Range Checks
+    // -------------------------------------------------------------------------
+    NewFontOptions newOpts;
+    newOpts.fontName = QStringLiteral("V05IconFont");
+    newOpts.familyName = QStringLiteral("V05IconFont");
+    newOpts.ascent = 800;
+    newOpts.descent = 200;
+
+    FontDocumentSnapshot newSnap;
+    QString err;
+    CHECK(bridge.createNewFont(newOpts, &newSnap, &err));
+    CHECK(bridge.hasOpenFont());
+    CHECK(bridge.currentFontPath().isEmpty());
+    CHECK(newSnap.summary.fontName == QStringLiteral("V05IconFont"));
+    CHECK(newSnap.summary.emSize == 1000);
+
+    // Verify SPUA-A and SPUA-B filter presets
+    const auto presets = UnicodeRangeFilter::defaultPresets();
+    bool hasSpuaA = false;
+    bool hasSpuaB = false;
+    for (const auto& p : presets) {
+        if (p.name.contains(QStringLiteral("SPUA-A"))) hasSpuaA = true;
+        if (p.name.contains(QStringLiteral("SPUA-B"))) hasSpuaB = true;
+    }
+    CHECK(hasSpuaA);
+    CHECK(hasSpuaB);
+
+    QString filterErr;
+    UnicodeRangeFilter spuaAFilter = UnicodeRangeFilter::parse(QStringLiteral("U+F0000-FFFFD"), false, &filterErr);
+    CHECK(spuaAFilter.isValid());
+    GlyphSummary dummySpuaGlyph;
+    dummySpuaGlyph.unicode = 0xF0005;
+    CHECK(spuaAFilter.matches(dummySpuaGlyph));
+
+    // -------------------------------------------------------------------------
+    // 2. Batch Import (SVGs & PNGs) into SPUA-A
+    // -------------------------------------------------------------------------
+    const QString svg1Path = QDir(tempDir.path()).filePath(QStringLiteral("icon1.svg"));
+    const QString svg2Path = QDir(tempDir.path()).filePath(QStringLiteral("icon2.svg"));
+    const QString png1Path = QDir(tempDir.path()).filePath(QStringLiteral("icon3.png"));
+
+    {
+        QFile f1(svg1Path);
+        CHECK(f1.open(QIODevice::WriteOnly));
+        f1.write(R"SVG(<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect x="10" y="10" width="80" height="80" fill="#000"/></svg>)SVG");
+
+        QFile f2(svg2Path);
+        CHECK(f2.open(QIODevice::WriteOnly));
+        f2.write(R"SVG(<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle cx="50" cy="50" r="40" fill="#000"/></svg>)SVG");
+
+        QImage img(64, 64, QImage::Format_ARGB32);
+        img.fill(Qt::transparent);
+        QPainter p(&img);
+        p.fillRect(QRect(16, 16, 32, 32), Qt::black);
+        CHECK(img.save(png1Path));
+    }
+
+    BatchImportJob job;
+    job.overwriteExisting = true;
+    job.defaultOptions.placementMode = GlyphPlacementMode::AutoAspectRatio;
+    job.defaultOptions.scaleToEm = true;
+
+    BatchImportItem item1; item1.filePath = svg1Path; item1.unicode = 0xF0001; item1.glyphName = QStringLiteral("square_icon");
+    BatchImportItem item2; item2.filePath = svg2Path; item2.unicode = 0xF0002; item2.glyphName = QStringLiteral("circle_icon");
+    BatchImportItem item3; item3.filePath = png1Path; item3.unicode = 0xF0003; item3.glyphName = QStringLiteral("png_icon");
+    job.items = {item1, item2, item3};
+
+    BatchImportResult bRes;
+    CHECK(bridge.batchImport(job, &bRes, &err));
+    CHECK(bRes.importedCount == 3);
+    CHECK(bRes.skippedCount == 0);
+
+    // Save and re-load to verify persistence
+    const QString fontOutPath = QDir(tempDir.path()).filePath(QStringLiteral("test_v05.sfd"));
+    ExportOptions expOpts;
+    expOpts.outputPath = fontOutPath;
+    CHECK(bridge.exportFont(expOpts, &err));
+    CHECK(bridge.currentFontPath() == fontOutPath);
+
+    // Verify in-place re-save works directly on the newly established path
+    CHECK(bridge.exportFont(expOpts, &err));
+
+    FontDocumentSnapshot reloadedSnap;
+    CHECK(bridge.openFont(fontOutPath, &reloadedSnap, &err));
+    CHECK(reloadedSnap.glyphs.size() >= 3);
+
+    // -------------------------------------------------------------------------
+    // 3. Move Glyphs Function (with collision checking)
+    // -------------------------------------------------------------------------
+    QList<int> gidsToMove;
+    for (const auto& g : reloadedSnap.glyphs) {
+        if (g.unicode == 0xF0001 || g.unicode == 0xF0002) {
+            gidsToMove.append(g.gid);
+        }
+    }
+    CHECK(gidsToMove.size() == 2);
+
+    // Move to U+F0002..U+F0003 without overwrite -> collision with 0xF0003 (png_icon)!
+    MoveGlyphsRequest failMoveReq;
+    failMoveReq.gids = gidsToMove;
+    failMoveReq.targetStartUnicode = 0xF0002;
+    failMoveReq.overwriteOccupied = false;
+    MoveGlyphsResult failRes;
+    CHECK(!bridge.moveGlyphs(failMoveReq, &failRes, &err));
+    CHECK(err.contains(QStringLiteral("already occupied")));
+
+    // Move to U+F0010 (all free)
+    MoveGlyphsRequest okMoveReq;
+    okMoveReq.gids = gidsToMove;
+    okMoveReq.targetStartUnicode = 0xF0010;
+    okMoveReq.overwriteOccupied = false;
+    MoveGlyphsResult okRes;
+    CHECK(bridge.moveGlyphs(okMoveReq, &okRes, &err));
+    CHECK(okRes.movedCount == 2);
+    CHECK(okRes.updatedGlyphs[0].unicode == 0xF0010);
+    CHECK(okRes.updatedGlyphs[1].unicode == 0xF0011);
+
+    // -------------------------------------------------------------------------
+    // 4. Batch Import JSON Definition File Load/Save
+    // -------------------------------------------------------------------------
+    const QString jsonDefPath = QDir(tempDir.path()).filePath(QStringLiteral("batch_def.json"));
+    CHECK(BatchImportDefinition::saveToFile(jsonDefPath, job, &err));
+    CHECK(QFileInfo::exists(jsonDefPath));
+
+    BatchImportJob loadedJob;
+    CHECK(BatchImportDefinition::loadFromFile(jsonDefPath, &loadedJob, &err));
+    CHECK(loadedJob.items.size() == 3);
+    CHECK(loadedJob.items[0].unicode == 0xF0001);
+    CHECK(loadedJob.items[1].glyphName == QStringLiteral("circle_icon"));
+
+    bridge.closeFont();
+    return 0;
+}
+

@@ -22,6 +22,8 @@ CustomGlyphAreaConfig CustomGlyphAreaConfig::createDefault() {
         {QStringLiteral("All Glyphs"), QStringLiteral("*"), true},
         {QStringLiteral("Basic Latin"), QStringLiteral("U+0020-007E"), false},
         {QStringLiteral("Icons / PUA"), QStringLiteral("U+E000-F8FF"), false},
+        {QStringLiteral("SPUA-A"), QStringLiteral("U+F0000-FFFFD"), false},
+        {QStringLiteral("SPUA-B"), QStringLiteral("U+100000-10FFFD"), false},
     };
     return cfg;
 }

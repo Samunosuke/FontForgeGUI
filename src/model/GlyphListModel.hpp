@@ -40,6 +40,7 @@ public:
     void setSearchText(const QString& query);
 
     const FontSummary& fontSummary() const { return m_summary; }
+    const QVector<GlyphSummary>& allGlyphs() const { return m_glyphs; }
     int totalGlyphCount() const { return m_glyphs.size(); }
     int filteredGlyphCount() const { return m_filteredIndices.size(); }
 

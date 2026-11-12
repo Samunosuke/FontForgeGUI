@@ -14,7 +14,7 @@ class ExportFontDialog : public QDialog {
     Q_OBJECT
 
 public:
-    explicit ExportFontDialog(const FontSummary& summary, QWidget* parent = nullptr);
+    explicit ExportFontDialog(const FontSummary& summary, bool saveAsMode = false, QWidget* parent = nullptr);
 
     ExportOptions exportOptions() const;
 

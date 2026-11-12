@@ -24,6 +24,16 @@ void FontWorker::initialize() {
     m_bridge->initialize();
 }
 
+void FontWorker::createNewFont(const ffgui::NewFontOptions& options) {
+    FontDocumentSnapshot snapshot;
+    QString error;
+    if (m_bridge->createNewFont(options, &snapshot, &error)) {
+        emit fontLoaded(snapshot);
+    } else {
+        emit fontLoadFailed(error);
+    }
+}
+
 void FontWorker::openFont(const QString& path) {
     FontDocumentSnapshot snapshot;
     QString error;
@@ -50,6 +60,16 @@ void FontWorker::updateGlyphMetadata(const GlyphMetadataUpdate& update) {
         emit glyphMetadataUpdated(updated);
     } else {
         emit glyphMetadataUpdateFailed(error);
+    }
+}
+
+void FontWorker::moveGlyphs(const ffgui::MoveGlyphsRequest& request) {
+    MoveGlyphsResult result;
+    QString error;
+    if (m_bridge->moveGlyphs(request, &result, &error)) {
+        emit glyphsMoved(result);
+    } else {
+        emit glyphsMoveFailed(error);
     }
 }
 
@@ -90,6 +110,16 @@ void FontWorker::importSvgToGlyph(const SvgImportOptions& options) {
         emit svgImported(result);
     } else {
         emit svgImportFailed(error);
+    }
+}
+
+void FontWorker::batchImport(const ffgui::BatchImportJob& job) {
+    BatchImportResult result;
+    QString error;
+    if (m_bridge->batchImport(job, &result, &error)) {
+        emit batchImportCompleted(result);
+    } else {
+        emit batchImportFailed(error);
     }
 }
 

@@ -1,8 +1,10 @@
 #include "ui/ExportFontDialog.hpp"
+#include "model/FontSettingsUtils.hpp"
 
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDialogButtonBox>
+#include <QDir>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFormLayout>
@@ -15,9 +17,9 @@
 
 namespace ffgui {
 
-ExportFontDialog::ExportFontDialog(const FontSummary& summary, QWidget* parent)
+ExportFontDialog::ExportFontDialog(const FontSummary& summary, bool saveAsMode, QWidget* parent)
     : QDialog(parent) {
-    setWindowTitle(tr("Export Font"));
+    setWindowTitle(saveAsMode ? tr("Save Font As") : tr("Export Font"));
     resize(520, 320);
 
     m_formats = {
@@ -35,9 +37,15 @@ ExportFontDialog::ExportFontDialog(const FontSummary& summary, QWidget* parent)
     auto* form = new QFormLayout();
 
     m_formatCombo = new QComboBox(this);
-    for (const FormatEntry& fmt : m_formats) {
-        m_formatCombo->addItem(fmt.label);
+    int defaultFormatIndex = 1; // Default to TTF (.ttf)
+    const QString srcSuffix = QFileInfo(summary.filePath).suffix().toLower();
+    for (int i = 0; i < m_formats.size(); ++i) {
+        m_formatCombo->addItem(m_formats[i].label);
+        if (!srcSuffix.isEmpty() && m_formats[i].extension.endsWith(srcSuffix, Qt::CaseInsensitive)) {
+            defaultFormatIndex = i;
+        }
     }
+    m_formatCombo->setCurrentIndex(defaultFormatIndex);
     form->addRow(tr("Format:"), m_formatCombo);
 
     auto* pathRow = new QHBoxLayout();
@@ -69,24 +77,35 @@ ExportFontDialog::ExportFontDialog(const FontSummary& summary, QWidget* parent)
 
     auto* buttons =
         new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
-    buttons->button(QDialogButtonBox::Ok)->setText(tr("Export"));
+    buttons->button(QDialogButtonBox::Ok)->setText(saveAsMode ? tr("Save") : tr("Export"));
     layout->addWidget(buttons);
 
-    // Default output path alongside source font
+    // Default output path: alongside source font or last used directory
     QFileInfo srcInfo(summary.filePath);
     const QString baseName =
-        !summary.fontName.isEmpty() ? summary.fontName : srcInfo.completeBaseName();
-    const QString dir = srcInfo.absolutePath().isEmpty() ? QStringLiteral(".") : srcInfo.absolutePath();
-    m_pathEdit->setText(dir + QLatin1Char('/') + baseName + m_formats[0].extension);
+        !summary.fontName.isEmpty() ? summary.fontName
+        : (!srcInfo.completeBaseName().isEmpty() ? srcInfo.completeBaseName()
+                                                : QStringLiteral("UntitledFont"));
+
+    QString dir = srcInfo.absolutePath();
+    if (summary.filePath.isEmpty() || dir.isEmpty() || dir == QStringLiteral(".")) {
+        dir = loadLastFontDirectory();
+        if (dir.isEmpty() || !QDir(dir).exists()) {
+            dir = QDir::homePath();
+        }
+    }
+    m_pathEdit->setText(dir + QLatin1Char('/') + baseName + m_formats[defaultFormatIndex].extension);
 
     connect(m_formatCombo, &QComboBox::currentIndexChanged, this,
             &ExportFontDialog::onFormatChanged);
     connect(browseBtn, &QPushButton::clicked, this, &ExportFontDialog::onBrowseClicked);
     connect(buttons, &QDialogButtonBox::accepted, this, [this]() {
-        if (m_pathEdit->text().trimmed().isEmpty()) {
-            QMessageBox::warning(this, tr("Export Font"), tr("Please specify an output file path."));
+        const QString out = m_pathEdit->text().trimmed();
+        if (out.isEmpty()) {
+            QMessageBox::warning(this, windowTitle(), tr("Please specify an output file path."));
             return;
         }
+        saveLastFontDirectory(out);
         accept();
     });
     connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
@@ -122,9 +141,10 @@ void ExportFontDialog::onBrowseClicked() {
                                                              : QStringLiteral(".otf");
     const QString filter = QStringLiteral("Font (*%1);;All Files (*)").arg(ext);
     const QString chosen =
-        QFileDialog::getSaveFileName(this, tr("Export Font As"), m_pathEdit->text(), filter);
+        QFileDialog::getSaveFileName(this, windowTitle(), m_pathEdit->text(), filter);
     if (!chosen.isEmpty()) {
         m_pathEdit->setText(chosen);
+        saveLastFontDirectory(chosen);
     }
 }
 

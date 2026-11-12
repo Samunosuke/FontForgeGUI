@@ -28,10 +28,14 @@ public:
 
     void initialize();
 
+    bool createNewFont(const NewFontOptions& options, FontDocumentSnapshot* outSnapshot,
+                       QString* outError);
     bool openFont(const QString& path, FontDocumentSnapshot* outSnapshot, QString* outError);
     bool exportFont(const ExportOptions& options, QString* outError);
     bool updateGlyphMetadata(const GlyphMetadataUpdate& update, GlyphSummary* outGlyph,
                              QString* outError);
+    bool moveGlyphs(const MoveGlyphsRequest& request, MoveGlyphsResult* outResult,
+                    QString* outError);
     bool createGlyph(const CreateGlyphRequest& request, CreateGlyphResult* outResult,
                      QString* outError);
     bool updateFontMetadata(const FontMetadataUpdate& update, FontSummary* outSummary,
@@ -39,9 +43,12 @@ public:
     bool validateFont(bool force, FontValidationReport* outReport, QString* outError);
     bool importSvgToGlyph(const SvgImportOptions& options, SvgImportResult* outResult,
                           QString* outError);
+    bool batchImport(const BatchImportJob& job, BatchImportResult* outResult,
+                     QString* outError);
     void closeFont();
 
     bool hasOpenFont() const;
+    QString currentFontPath() const;
 
     static QStringList availableSfntStringIds();
     static QVector<QPair<int, QString>> commonSfntLanguages();

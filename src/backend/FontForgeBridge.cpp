@@ -1,9 +1,13 @@
 #include "backend/FontForgeBridge.hpp"
+#include "model/BitmapTracer.hpp"
+#include "model/GlyphMetadataUtils.hpp"
+#include "model/SvgSanitizer.hpp"
 
 #include <QByteArray>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QRegularExpression>
 #include <QTransform>
 
 #include <algorithm>
@@ -507,6 +511,64 @@ void FontForgeBridge::initialize() {
     m_impl->initialized = true;
 }
 
+bool FontForgeBridge::createNewFont(const NewFontOptions& options, FontDocumentSnapshot* outSnapshot,
+                                    QString* outError) {
+    initialize();
+    closeFont();
+    g_lastError.clear();
+
+    SplineFont* sf = SplineFontNew();
+    if (sf == nullptr) {
+        if (outError) {
+            *outError = QStringLiteral("Failed to allocate new blank font.");
+        }
+        return false;
+    }
+    sf->onlybitmaps = false;
+
+    const QString fontName = options.fontName.trimmed().isEmpty() ? QStringLiteral("Untitled")
+                                                                  : options.fontName.trimmed();
+    const QString familyName = options.familyName.trimmed().isEmpty() ? fontName
+                                                                      : options.familyName.trimmed();
+    const QString fullName = options.fullName.trimmed().isEmpty() ? familyName
+                                                                  : options.fullName.trimmed();
+    const QString weight = options.weight.trimmed().isEmpty() ? QStringLiteral("Regular")
+                                                              : options.weight.trimmed();
+
+    replaceCString(&sf->fontname, fontName, false);
+    replaceCString(&sf->familyname, familyName, false);
+    replaceCString(&sf->fullname, fullName, false);
+    replaceCString(&sf->weight, weight, false);
+    replaceCString(&sf->version, options.version.trimmed().isEmpty() ? QStringLiteral("1.0")
+                                                                    : options.version.trimmed(), true);
+    if (!options.copyright.isEmpty()) {
+        replaceCString(&sf->copyright, options.copyright, true);
+    }
+
+    const int ascent = options.ascent > 0 ? options.ascent : 800;
+    const int descent = options.descent >= 0 ? options.descent : 200;
+    sf->ascent = ascent;
+    sf->descent = descent;
+
+    FontViewBase* fv = FVAppend(_FontViewCreate(sf));
+    if (fv == nullptr) {
+        SplineFontFree(sf);
+        if (outError) {
+            *outError = QStringLiteral("Failed to create FontForge view for new font.");
+        }
+        return false;
+    }
+
+    m_impl->fv = fv;
+    m_impl->sf = fv->sf ? fv->sf : sf;
+    m_impl->currentPath.clear();
+
+    if (outSnapshot != nullptr) {
+        *outSnapshot = buildSnapshot(m_impl->sf, m_impl->fv, QString());
+    }
+    return true;
+}
+
 bool FontForgeBridge::openFont(const QString& path, FontDocumentSnapshot* outSnapshot,
                                QString* outError) {
     initialize();
@@ -661,7 +723,10 @@ bool FontForgeBridge::exportFont(const ExportOptions& options, QString* outError
         }
     }
 
-    if (isInPlaceSave) {
+    if (isInPlaceSave || m_impl->currentPath.isEmpty() || options.isSaveAs) {
+        m_impl->currentPath = options.outputPath;
+        replaceCString(&m_impl->sf->filename, options.outputPath, false);
+        replaceCString(&m_impl->sf->origname, options.outputPath, false);
         m_impl->sf->changed = false;
     }
     return true;
@@ -755,6 +820,118 @@ bool FontForgeBridge::updateGlyphMetadata(const GlyphMetadataUpdate& update, Gly
 
     if (outGlyph != nullptr) {
         *outGlyph = extractGlyphSummary(sc, update.gid, activeLayer);
+    }
+    return true;
+}
+
+bool FontForgeBridge::moveGlyphs(const MoveGlyphsRequest& request, MoveGlyphsResult* outResult,
+                                 QString* outError) {
+    if (!hasOpenFont()) {
+        if (outError) {
+            *outError = QStringLiteral("No font is currently loaded.");
+        }
+        return false;
+    }
+    if (request.gids.isEmpty()) {
+        if (outError) {
+            *outError = QStringLiteral("No glyphs selected to move.");
+        }
+        return false;
+    }
+    if (request.targetStartUnicode < 0 || request.targetStartUnicode > 0x10FFFF) {
+        if (outError) {
+            *outError = QStringLiteral("Target start Unicode must be between U+0000 and U+10FFFF.");
+        }
+        return false;
+    }
+
+    const int totalMove = request.gids.size();
+    if (static_cast<int64_t>(request.targetStartUnicode) + totalMove - 1 > 0x10FFFF) {
+        if (outError) {
+            *outError = QStringLiteral("Target Unicode range exceeds maximum U+10FFFF.");
+        }
+        return false;
+    }
+
+    SplineFont* sf = m_impl->sf;
+    const int activeLayer =
+        (m_impl->fv && m_impl->fv->active_layer >= 0) ? m_impl->fv->active_layer : ly_fore;
+
+    // Check which target slots are already occupied by glyphs that are NOT part of the moving set
+    QSet<int> movingGidSet(request.gids.begin(), request.gids.end());
+    QList<QPair<int32_t, int>> collisions; // (targetUnicode, occupiedGid)
+    for (int i = 0; i < totalMove; ++i) {
+        const int32_t targetCp = request.targetStartUnicode + i;
+        for (int gid = 0; gid < sf->glyphcnt; ++gid) {
+            const SplineChar* sc = sf->glyphs[gid];
+            if (sc != nullptr && sc->unicodeenc == targetCp && !movingGidSet.contains(gid)) {
+                collisions.append({targetCp, gid});
+                break;
+            }
+        }
+    }
+
+    if (!collisions.isEmpty() && !request.overwriteOccupied) {
+        if (outError) {
+            QStringList conflictMsgs;
+            for (const auto& c : collisions) {
+                const SplineChar* occ = sf->glyphs[c.second];
+                conflictMsgs.append(QStringLiteral("U+%1 (%2)")
+                                        .arg(c.first, 4, 16, QLatin1Char('0'))
+                                        .toUpper()
+                                        .arg(occ ? qstr(occ->name) : QStringLiteral("#%1").arg(c.second)));
+            }
+            *outError = QStringLiteral("%1 target code point(s) already occupied: %2")
+                            .arg(collisions.size())
+                            .arg(conflictMsgs.join(QStringLiteral(", ")));
+        }
+        return false;
+    }
+
+    // If overwriteOccupied is true, unencode any non-moving glyphs currently using target slots
+    if (request.overwriteOccupied) {
+        for (const auto& c : collisions) {
+            SplineChar* occ = sf->glyphs[c.second];
+            if (occ != nullptr) {
+                occ->unicodeenc = -1;
+                occ->changed = true;
+                SCRefreshTitles(occ);
+            }
+        }
+    }
+
+    MoveGlyphsResult result;
+    result.movedCount = 0;
+
+    for (int i = 0; i < totalMove; ++i) {
+        const int gid = request.gids[i];
+        if (gid < 0 || gid >= sf->glyphcnt || sf->glyphs[gid] == nullptr) {
+            continue;
+        }
+        SplineChar* sc = sf->glyphs[gid];
+        const int32_t targetCp = request.targetStartUnicode + i;
+        sc->unicodeenc = targetCp;
+        sc->changed = true;
+        sf->changed = true;
+        SCRefreshTitles(sc);
+
+        for (FontViewBase* fvs = sf->fv; fvs != nullptr; fvs = fvs->nextsame) {
+            if (fvs->map && fvs->map->enc && fvs->map->enc != &custom) {
+                fvs->map->enc = &custom;
+            }
+        }
+
+        if (activeLayer >= 0 && activeLayer < sc->layer_cnt) {
+            sc->layers[activeLayer].validation_state = vs_unknown;
+        }
+
+        result.updatedGlyphs.append(extractGlyphSummary(sc, gid, activeLayer));
+        ++result.movedCount;
+    }
+
+    GlyphHashFree(sf);
+    if (outResult != nullptr) {
+        *outResult = std::move(result);
     }
     return true;
 }
@@ -1197,6 +1374,170 @@ bool FontForgeBridge::importSvgToGlyph(const SvgImportOptions& options, SvgImpor
     return true;
 }
 
+bool FontForgeBridge::batchImport(const BatchImportJob& job, BatchImportResult* outResult,
+                                  QString* outError) {
+    if (!hasOpenFont()) {
+        if (outError) {
+            *outError = QStringLiteral("No font is currently loaded.");
+        }
+        return false;
+    }
+    if (job.items.isEmpty()) {
+        if (outError) {
+            *outError = QStringLiteral("Batch import job contains no items.");
+        }
+        return false;
+    }
+
+    SplineFont* sf = m_impl->sf;
+    const int totalItems = job.items.size();
+    BatchImportResult res;
+
+    for (int i = 0; i < totalItems; ++i) {
+        const BatchImportItem& item = job.items[i];
+        if (m_impl->progressCb) {
+            m_impl->progressCb(i, totalItems,
+                               QStringLiteral("Importing %1 (%2/%3)")
+                                   .arg(QFileInfo(item.filePath).fileName())
+                                   .arg(i + 1)
+                                   .arg(totalItems));
+        }
+
+        const QFileInfo fi(item.filePath);
+        if (!fi.exists() || !fi.isFile()) {
+            res.errors.append(QStringLiteral("File not found: %1").arg(item.filePath));
+            ++res.skippedCount;
+            continue;
+        }
+
+        const QString ext = fi.suffix().toLower();
+        const bool isPng = (ext == QStringLiteral("png"));
+        const bool isSvg = (ext == QStringLiteral("svg"));
+        if (!isPng && !isSvg) {
+            res.errors.append(QStringLiteral("Unsupported file extension: %1").arg(item.filePath));
+            ++res.skippedCount;
+            continue;
+        }
+
+        int32_t targetUnicode = item.unicode;
+        QString glyphName = item.glyphName.trimmed();
+        if (glyphName.isEmpty()) {
+            glyphName = fi.completeBaseName().replace(QRegularExpression(QStringLiteral("[^A-Za-z0-9_.-]")),
+                                                     QStringLiteral("_"));
+        }
+
+        // Determine or create target glyph
+        int targetGid = -1;
+        if (targetUnicode >= 0) {
+            for (int gid = 0; gid < sf->glyphcnt; ++gid) {
+                if (sf->glyphs[gid] != nullptr && sf->glyphs[gid]->unicodeenc == targetUnicode) {
+                    targetGid = gid;
+                    break;
+                }
+            }
+        }
+        if (targetGid == -1 && !glyphName.isEmpty()) {
+            for (int gid = 0; gid < sf->glyphcnt; ++gid) {
+                if (sf->glyphs[gid] != nullptr && sf->glyphs[gid]->name != nullptr &&
+                    glyphName == QString::fromUtf8(sf->glyphs[gid]->name)) {
+                    targetGid = gid;
+                    break;
+                }
+            }
+        }
+
+        if (targetGid >= 0 && !job.overwriteExisting) {
+            res.errors.append(QStringLiteral("Code point / glyph already exists: %1 (U+%2)")
+                                  .arg(glyphName)
+                                  .arg(targetUnicode, 4, 16, QLatin1Char('0'))
+                                  .toUpper());
+            ++res.skippedCount;
+            continue;
+        }
+
+        if (targetGid == -1) {
+            CreateGlyphRequest createReq;
+            createReq.name = glyphName;
+            createReq.unicode = targetUnicode;
+            createReq.advanceWidth = sf->ascent + sf->descent;
+            CreateGlyphResult createRes;
+            QString createErr;
+            if (!createGlyph(createReq, &createRes, &createErr)) {
+                res.errors.append(QStringLiteral("Failed to create glyph '%1': %2")
+                                      .arg(glyphName, createErr));
+                ++res.skippedCount;
+                continue;
+            }
+            targetGid = createRes.glyph.gid;
+        }
+
+        SvgImportOptions importOpts = item.hasCustomOptions ? item.customOptions : job.defaultOptions;
+        importOpts.gid = targetGid;
+
+        if (isPng) {
+            BitmapTraceOptions traceOpts;
+            traceOpts.useAlpha = true;
+            traceOpts.threshold = 128;
+            traceOpts.curveSmoothing = 0.75;
+            BitmapTraceResult traceRes = BitmapTracer::traceFile(item.filePath, traceOpts);
+            if (!traceRes.valid || traceRes.totalContours == 0) {
+                res.errors.append(QStringLiteral("Failed to trace PNG '%1': %2")
+                                      .arg(item.filePath, traceRes.errorMessage));
+                ++res.skippedCount;
+                continue;
+            }
+            importOpts.svgData = traceRes.solidSvg;
+            importOpts.cutoutSvgData = traceRes.cutoutSvg;
+            importOpts.svgWidth = traceRes.viewBox.width();
+            importOpts.svgHeight = traceRes.viewBox.height();
+        } else {
+            SvgFilterOptions filterOpts;
+            filterOpts.stripEditorMetadata = true;
+            filterOpts.removeHiddenElements = true;
+            filterOpts.removeBackgroundRects = true;
+            filterOpts.stripNoFillElements = true;
+            filterOpts.keepStrokes = false;
+            filterOpts.normalizeToBlackFill = true;
+            filterOpts.whiteAsCutout = true;
+            filterOpts.stripTinyPaths = true;
+            SvgSanitizeResult sanRes = SvgSanitizer::sanitizeFile(item.filePath, filterOpts);
+            if (!sanRes.valid || sanRes.keptGeometryCount == 0) {
+                res.errors.append(QStringLiteral("Failed to parse SVG '%1': %2")
+                                      .arg(item.filePath, sanRes.errorMessage));
+                ++res.skippedCount;
+                continue;
+            }
+            importOpts.svgData = !sanRes.solidSvg.isEmpty() ? sanRes.solidSvg : sanRes.cleanedSvg;
+            importOpts.strokeSvgData = sanRes.strokeSvg;
+            importOpts.cutoutSvgData = sanRes.cutoutSvg;
+            importOpts.svgWidth = sanRes.width > 0.0 ? sanRes.width : sanRes.viewBox.width();
+            importOpts.svgHeight = sanRes.height > 0.0 ? sanRes.height : sanRes.viewBox.height();
+        }
+
+        SvgImportResult importRes;
+        QString importErr;
+        if (!importSvgToGlyph(importOpts, &importRes, &importErr)) {
+            res.errors.append(QStringLiteral("Failed to import '%1' into glyph: %2")
+                                  .arg(item.filePath, importErr));
+            ++res.skippedCount;
+            continue;
+        }
+
+        res.updatedGlyphs.append(importRes.glyph);
+        ++res.importedCount;
+    }
+
+    if (m_impl->progressCb) {
+        m_impl->progressCb(totalItems, totalItems, QStringLiteral("Batch import completed."));
+    }
+
+    res.updatedFontSummary = extractFontSummary(sf, m_impl->fv, m_impl->currentPath);
+    if (outResult != nullptr) {
+        *outResult = std::move(res);
+    }
+    return true;
+}
+
 void FontForgeBridge::closeFont() {
     if (m_impl->fv != nullptr) {
         FontViewClose(m_impl->fv);
@@ -1211,6 +1552,10 @@ void FontForgeBridge::closeFont() {
 
 bool FontForgeBridge::hasOpenFont() const {
     return m_impl->sf != nullptr && m_impl->fv != nullptr;
+}
+
+QString FontForgeBridge::currentFontPath() const {
+    return m_impl->currentPath;
 }
 
 QStringList FontForgeBridge::availableSfntStringIds() {

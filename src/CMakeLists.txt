@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(FontForgeGUI VERSION 0.4.0 LANGUAGES C CXX)
+project(FontForgeGUI VERSION 0.5.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -55,6 +55,9 @@ add_library(ffgui_core STATIC
     model/SvgSanitizer.cpp
     model/BitmapTracer.hpp
     model/BitmapTracer.cpp
+    model/BatchImportDefinition.hpp
+    model/BatchImportDefinition.cpp
+    model/FontSettingsUtils.hpp
 )
 
 target_include_directories(ffgui_core
@@ -94,6 +97,12 @@ add_executable(FontForgeGUI WIN32
     ui/FontMetadataDialog.cpp
     ui/ValidationPanel.hpp
     ui/ValidationPanel.cpp
+    ui/NewFontDialog.hpp
+    ui/NewFontDialog.cpp
+    ui/MoveGlyphsDialog.hpp
+    ui/MoveGlyphsDialog.cpp
+    ui/BatchImportDialog.hpp
+    ui/BatchImportDialog.cpp
 )
 
 target_link_libraries(FontForgeGUI
@@ -147,4 +156,11 @@ if(BUILD_TESTING)
         TEST_FONTS_DIR="${FONTFORGE_SOURCE_DIR}/tests/fonts"
     )
     add_test(NAME v04_features COMMAND test_v04_features)
+
+    add_executable(test_v05_features tests/test_v05_features.cpp)
+    target_link_libraries(test_v05_features PRIVATE ffgui_core)
+    target_compile_definitions(test_v05_features PRIVATE
+        TEST_FONTS_DIR="${FONTFORGE_SOURCE_DIR}/tests/fonts"
+    )
+    add_test(NAME v05_features COMMAND test_v05_features)
 endif()

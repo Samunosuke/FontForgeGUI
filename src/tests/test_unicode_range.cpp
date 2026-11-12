@@ -75,16 +75,17 @@ int main() {
 
     ffgui::CustomGlyphAreaConfig cfg = ffgui::CustomGlyphAreaConfig::createDefault();
     cfg.areas.append({QStringLiteral("Symbols"), QStringLiteral("U+2000-206F"), true});
-    cfg.activeIndex = 3;
+    const int customIdx = cfg.areas.size() - 1;
+    cfg.activeIndex = customIdx;
     CHECK(cfg.saveForFont(fakeFont, &err));
 
     ffgui::CustomGlyphAreaConfig loaded;
     CHECK(ffgui::CustomGlyphAreaConfig::loadForFont(fakeFont, &loaded, &err));
-    CHECK(loaded.activeIndex == 3);
+    CHECK(loaded.activeIndex == customIdx);
     CHECK(loaded.areas.size() == cfg.areas.size());
-    CHECK(loaded.areas[3].name == QStringLiteral("Symbols"));
-    CHECK(loaded.areas[3].rangeSpec == QStringLiteral("U+2000-206F"));
-    CHECK(loaded.areas[3].includeUnencoded == true);
+    CHECK(loaded.areas[customIdx].name == QStringLiteral("Symbols"));
+    CHECK(loaded.areas[customIdx].rangeSpec == QStringLiteral("U+2000-206F"));
+    CHECK(loaded.areas[customIdx].includeUnencoded == true);
 
     // 3. GlyphListModel filtering + search
     ffgui::FontDocumentSnapshot snap;
