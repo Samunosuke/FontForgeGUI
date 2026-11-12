@@ -1,5 +1,7 @@
 #include "ui/GlyphInspectorPanel.hpp"
 
+#include "model/GlyphMetadataUtils.hpp"
+
 #include <QFormLayout>
 #include <QGroupBox>
 #include <QHBoxLayout>
@@ -8,48 +10,11 @@
 #include <QPainter>
 #include <QPalette>
 #include <QPushButton>
-#include <QRegularExpression>
 #include <QVBoxLayout>
 #include <algorithm>
 #include <cmath>
 
 namespace ffgui {
-
-namespace {
-
-QString formatCodePoint(int32_t cp) {
-    if (cp < 0) {
-        return {};
-    }
-    return QStringLiteral("U+%1").arg(cp, 4, 16, QLatin1Char('0')).toUpper();
-}
-
-bool parseSingleCodePoint(QString text, int32_t* outCp) {
-    text = text.trimmed();
-    if (text.isEmpty() || text == QStringLiteral("-1") ||
-        text.compare(QStringLiteral("none"), Qt::CaseInsensitive) == 0 ||
-        text.compare(QStringLiteral("unencoded"), Qt::CaseInsensitive) == 0 ||
-        text == QStringLiteral("—")) {
-        *outCp = -1;
-        return true;
-    }
-    if (text.startsWith(QStringLiteral("U+"), Qt::CaseInsensitive) ||
-        text.startsWith(QStringLiteral("0x"), Qt::CaseInsensitive)) {
-        text = text.mid(2);
-    }
-    if (text.isEmpty() || text.size() > 6) {
-        return false;
-    }
-    bool ok = false;
-    const uint32_t val = text.toUInt(&ok, 16);
-    if (!ok || val > 0x10FFFFu) {
-        return false;
-    }
-    *outCp = static_cast<int32_t>(val);
-    return true;
-}
-
-} // namespace
 
 GlyphPreviewCanvas::GlyphPreviewCanvas(QWidget* parent) : QWidget(parent) {
     setMinimumHeight(200);
@@ -183,8 +148,12 @@ GlyphInspectorPanel::GlyphInspectorPanel(QWidget* parent) : QWidget(parent) {
     auto* btnRow = new QHBoxLayout();
     m_applyBtn = new QPushButton(tr("Apply"), glyphGroup);
     m_revertBtn = new QPushButton(tr("Revert"), glyphGroup);
+    m_importSvgBtn = new QPushButton(tr("Import SVG…"), glyphGroup);
+    m_importSvgBtn->setToolTip(tr("Filter and import vector contours from an SVG file"));
+    m_importSvgBtn->setEnabled(false);
     btnRow->addWidget(m_applyBtn);
     btnRow->addWidget(m_revertBtn);
+    btnRow->addWidget(m_importSvgBtn);
 
     m_gidLabel = new QLabel(QStringLiteral("—"), glyphGroup);
     m_widthLabel = new QLabel(QStringLiteral("—"), glyphGroup);
@@ -226,6 +195,8 @@ GlyphInspectorPanel::GlyphInspectorPanel(QWidget* parent) : QWidget(parent) {
             &GlyphInspectorPanel::onApplyClicked);
     connect(m_applyBtn, &QPushButton::clicked, this, &GlyphInspectorPanel::onApplyClicked);
     connect(m_revertBtn, &QPushButton::clicked, this, &GlyphInspectorPanel::onRevertClicked);
+    connect(m_importSvgBtn, &QPushButton::clicked, this,
+            &GlyphInspectorPanel::importSvgRequested);
     connect(m_editFontMetaBtn, &QPushButton::clicked, this,
             &GlyphInspectorPanel::editFontMetadataRequested);
 
@@ -267,6 +238,7 @@ void GlyphInspectorPanel::setGlyph(const GlyphSummary* glyph) {
         m_updatingUi = false;
         m_applyBtn->setEnabled(false);
         m_revertBtn->setEnabled(false);
+        m_importSvgBtn->setEnabled(false);
 
         m_gidLabel->setText(QStringLiteral("—"));
         m_widthLabel->setText(QStringLiteral("—"));
@@ -277,6 +249,7 @@ void GlyphInspectorPanel::setGlyph(const GlyphSummary* glyph) {
 
     m_hasGlyph = true;
     m_currentGlyph = *glyph;
+    m_importSvgBtn->setEnabled(true);
     m_canvas->setGlyph(m_fontSummary, *glyph);
     populateEditorFromGlyph();
 
@@ -329,19 +302,8 @@ bool GlyphInspectorPanel::parseEditorFields(GlyphMetadataUpdate* outUpdate, QStr
     }
 
     const QString name = m_nameEdit->text().trimmed();
-    if (name.isEmpty()) {
-        if (outError) {
-            *outError = tr("Glyph name cannot be empty.");
-        }
+    if (!validateGlyphName(name, outError)) {
         return false;
-    }
-    for (QChar c : name) {
-        if (c.isSpace()) {
-            if (outError) {
-                *outError = tr("Glyph name cannot contain spaces.");
-            }
-            return false;
-        }
     }
 
     int32_t primaryUni = -1;
@@ -353,22 +315,8 @@ bool GlyphInspectorPanel::parseEditorFields(GlyphMetadataUpdate* outUpdate, QStr
     }
 
     QList<int32_t> alts;
-    const QString altText = m_altUnicodesEdit->text().trimmed();
-    if (!altText.isEmpty()) {
-        const QStringList tokens =
-            altText.split(QRegularExpression(QStringLiteral("[,;\\s]+")), Qt::SkipEmptyParts);
-        for (const QString& tok : tokens) {
-            int32_t altCp = -1;
-            if (!parseSingleCodePoint(tok, &altCp) || altCp < 0) {
-                if (outError) {
-                    *outError = tr("Invalid alternate Unicode: '%1'").arg(tok);
-                }
-                return false;
-            }
-            if (!alts.contains(altCp)) {
-                alts.append(altCp);
-            }
-        }
+    if (!parseAltUnicodesList(m_altUnicodesEdit->text(), &alts, outError)) {
+        return false;
     }
 
     if (outUpdate) {
@@ -385,17 +333,7 @@ void GlyphInspectorPanel::onFieldsEdited() {
         return;
     }
 
-    int32_t previewCp = -1;
-    if (parseSingleCodePoint(m_unicodeEdit->text(), &previewCp) && previewCp >= 0x20 &&
-        previewCp <= 0x10FFFF) {
-        m_unicodeCharLabel->setText(
-            QStringLiteral("'%1'").arg(QString::fromUcs4(reinterpret_cast<const char32_t*>(&previewCp), 1)));
-    } else if (previewCp < 0 && parseSingleCodePoint(m_unicodeEdit->text(), &previewCp)) {
-        m_unicodeCharLabel->setText(tr("—"));
-    } else {
-        m_unicodeCharLabel->setText(QStringLiteral("?"));
-    }
-
+    m_unicodeCharLabel->setText(formatUnicodePreviewBadge(m_unicodeEdit->text()));
     updateActionButtons();
 }
 

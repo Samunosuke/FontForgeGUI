@@ -42,17 +42,23 @@ private slots:
     void onCloseFontClicked();
     void onEditFontMetadataClicked();
     void onValidateFontClicked();
+    void onNewGlyphClicked();
+    void onImportSvgClicked();
 
     void onFontLoaded(const ffgui::FontDocumentSnapshot& snapshot);
     void onFontLoadFailed(const QString& error);
     void onFontExported(const QString& outputPath);
     void onFontExportFailed(const QString& error);
+    void onGlyphCreated(const ffgui::CreateGlyphResult& result);
+    void onGlyphCreationFailed(const QString& error);
     void onGlyphMetadataUpdated(const ffgui::GlyphSummary& glyph);
     void onGlyphMetadataUpdateFailed(const QString& error);
     void onFontMetadataUpdated(const ffgui::FontSummary& summary);
     void onFontMetadataUpdateFailed(const QString& error);
     void onFontValidated(const ffgui::FontValidationReport& report);
     void onFontValidationFailed(const QString& error);
+    void onSvgImported(const ffgui::SvgImportResult& result);
+    void onSvgImportFailed(const QString& error);
     void onFontClosed();
     void onLogMessage(const QString& level, const QString& message);
     void onProgressUpdated(int current, int total, const QString& status);
@@ -76,6 +82,8 @@ private:
     void syncAreaWidgetsFromConfig();
     void updateWindowTitleAndCounts();
     void persistAreaConfigIfOpen(bool showStatus);
+    void applyUpdatedGlyph(const GlyphSummary& glyph);
+    const GlyphSummary* currentSelectedGlyph() const;
 
     QThread m_workerThread;
     FontWorker* m_worker = nullptr;
@@ -92,6 +100,8 @@ private:
     QAction* m_closeAction = nullptr;
     QAction* m_fontMetaAction = nullptr;
     QAction* m_validateAction = nullptr;
+    QAction* m_newGlyphAction = nullptr;
+    QAction* m_importSvgAction = nullptr;
 
     QComboBox* m_areaCombo = nullptr;
     QLineEdit* m_rangeEdit = nullptr;
@@ -113,6 +123,7 @@ private:
     bool m_updatingAreaUi = false;
     bool m_hasOpenFont = false;
     bool m_modified = false;
+    bool m_openSvgAfterCreate = false;
 };
 
 } // namespace ffgui

@@ -104,4 +104,37 @@ struct FontValidationReport {
     QVector<GlyphValidationIssue> issues;
 };
 
+struct SvgImportOptions {
+    int gid = -1;
+    QByteArray svgData;
+    QByteArray strokeSvgData;
+    QByteArray cutoutSvgData;
+    bool replaceExistingContours = true;
+    bool scaleToEm = true;
+    bool simplify = true;
+    bool correctDirection = true;
+    bool removeOverlap = false;
+    bool roundToInt = true;
+    bool updateAdvanceWidth = false;
+    double svgWidth = 0.0;
+    double svgHeight = 0.0;
+};
+
+struct SvgImportResult {
+    GlyphSummary glyph;
+    int importedContours = 0;
+};
+
+struct CreateGlyphRequest {
+    QString name;
+    int32_t unicode = -1;
+    QList<int32_t> altUnicodes;
+    int advanceWidth = 1000;
+};
+
+struct CreateGlyphResult {
+    GlyphSummary glyph;
+    FontSummary fontSummary;
+};
+
 } // namespace ffgui

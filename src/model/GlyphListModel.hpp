@@ -33,6 +33,7 @@ public:
     void setDocument(const FontDocumentSnapshot& snapshot);
     void setFontSummary(const FontSummary& summary);
     bool updateGlyph(const GlyphSummary& updated);
+    void addGlyph(const GlyphSummary& added, const FontSummary& updatedSummary);
     void clear();
 
     void setRangeFilter(const UnicodeRangeFilter& filter);

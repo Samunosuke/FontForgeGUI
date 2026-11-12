@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
@@ -16,15 +17,23 @@
 extern "C" {
 #include <fontforge-config.h>
 #include "baseviews.h"
+#include "cvundoes.h"
+#include "encoding.h"
 #include "fontforge.h"
 #include "fvfonts.h"
 #include "lookups.h"
+#include "namelist.h"
 #include "savefont.h"
+#include "sd.h"
 #include "sfd.h"
 #include "splinechar.h"
 #include "splinefont.h"
+#include "splineorder2.h"
+#include "splineoverlap.h"
 #include "splineutil.h"
+#include "splineutil2.h"
 #include "start.h"
+#include "svg.h"
 #include "tottf.h"
 #include "uiinterface.h"
 #include "ustring.h"
@@ -33,6 +42,25 @@ extern "C" {
 namespace ffgui {
 
 namespace {
+
+void assignAltUnicodes(SplineChar* sc, const QList<int32_t>& altUnicodes) {
+    struct altuni* head = nullptr;
+    struct altuni* tail = nullptr;
+    for (int32_t alt : altUnicodes) {
+        auto* node = static_cast<struct altuni*>(chunkalloc(sizeof(struct altuni)));
+        node->unienc = alt;
+        node->vs = -1;
+        node->fid = 0;
+        if (head == nullptr) {
+            head = node;
+        } else {
+            tail->next = node;
+        }
+        tail = node;
+    }
+    AltUniFree(sc->altuni);
+    sc->altuni = head;
+}
 
 FontForgeBridge::LogCallback* g_logCallback = nullptr;
 FontForgeBridge::ProgressCallback* g_progressCallback = nullptr;
@@ -660,22 +688,7 @@ bool FontForgeBridge::updateGlyphMetadata(const GlyphMetadataUpdate& update, Gly
         }
     }
 
-    struct altuni* head = nullptr;
-    struct altuni* tail = nullptr;
-    for (int32_t alt : update.altUnicodes) {
-        auto* node = static_cast<struct altuni*>(chunkalloc(sizeof(struct altuni)));
-        node->unienc = alt;
-        node->vs = -1;
-        node->fid = 0;
-        if (head == nullptr) {
-            head = node;
-        } else {
-            tail->next = node;
-        }
-        tail = node;
-    }
-    AltUniFree(sc->altuni);
-    sc->altuni = head;
+    assignAltUnicodes(sc, update.altUnicodes);
     sc->changed = true;
     sf->changed = true;
 
@@ -687,6 +700,121 @@ bool FontForgeBridge::updateGlyphMetadata(const GlyphMetadataUpdate& update, Gly
 
     if (outGlyph != nullptr) {
         *outGlyph = extractGlyphSummary(sc, update.gid, activeLayer);
+    }
+    return true;
+}
+
+bool FontForgeBridge::createGlyph(const CreateGlyphRequest& request, CreateGlyphResult* outResult,
+                                  QString* outError) {
+    if (!hasOpenFont()) {
+        if (outError) {
+            *outError = QStringLiteral("No font is currently loaded.");
+        }
+        return false;
+    }
+
+    if (request.unicode < -1 || request.unicode > 0x10FFFF) {
+        if (outError) {
+            *outError = QStringLiteral("Unicode code point must be -1 (unencoded) or U+0000..U+10FFFF.");
+        }
+        return false;
+    }
+
+    const QString trimmedName = request.name.trimmed();
+    if (trimmedName.isEmpty() && request.unicode < 0) {
+        if (outError) {
+            *outError = QStringLiteral("Specify at least a glyph name or a Unicode code point.");
+        }
+        return false;
+    }
+    for (QChar c : trimmedName) {
+        if (c.isSpace()) {
+            if (outError) {
+                *outError = QStringLiteral("Glyph name must not contain whitespace.");
+            }
+            return false;
+        }
+    }
+
+    SplineFont* sf = m_impl->sf;
+    if (request.unicode >= 0) {
+        for (int gid = 0; gid < sf->glyphcnt; ++gid) {
+            const SplineChar* existing = sf->glyphs[gid];
+            if (existing != nullptr && existing->unicodeenc == request.unicode) {
+                if (outError) {
+                    *outError = QStringLiteral("Unicode U+%1 is already assigned to glyph #%2 (%3).")
+                                    .arg(request.unicode, 4, 16, QLatin1Char('0'))
+                                    .toUpper()
+                                    .arg(gid)
+                                    .arg(qstr(existing->name));
+                }
+                return false;
+            }
+        }
+    }
+
+    QByteArray nameBytes = trimmedName.toUtf8();
+    if (nameBytes.isEmpty()) {
+        char autoBuf[64]{};
+        const char* stdName = StdGlyphName(autoBuf, request.unicode, sf->uni_interp, sf->for_new_glyphs);
+        nameBytes = QByteArray(stdName != nullptr ? stdName : "glyph");
+    }
+
+    if (SplineChar* dup = SFHashName(sf, nameBytes.constData()); dup != nullptr) {
+        if (outError) {
+            *outError = QStringLiteral("A glyph named '%1' already exists (#%2).")
+                            .arg(QString::fromUtf8(nameBytes))
+                            .arg(dup->orig_pos);
+        }
+        return false;
+    }
+
+    SplineChar* sc = nullptr;
+    EncMap* map = m_impl->fv->map;
+    const int enc = SFFindSlot(sf, map, request.unicode, nameBytes.constData());
+    const bool slotFree = (enc >= 0 && enc < map->enccount)
+        && (map->map[enc] == -1 || map->map[enc] >= sf->glyphcnt || sf->glyphs[map->map[enc]] == nullptr);
+
+    if (slotFree) {
+        sc = SFMakeChar(sf, map, enc);
+        if (sc != nullptr) {
+            free(sc->name);
+            sc->name = copy(nameBytes.constData());
+            sc->unicodeenc = request.unicode;
+            GlyphHashFree(sf);
+            SFHashGlyph(sf, sc);
+        }
+    }
+
+    if (sc == nullptr) {
+        sc = SFSplineCharCreate(sf);
+        if (sf->strokedfont) {
+            sc->layers[ly_fore].dostroke = true;
+            sc->layers[ly_fore].dofill = false;
+        }
+        sc->unicodeenc = request.unicode;
+        sc->name = copy(nameBytes.constData());
+        SFAddGlyphAndEncode(sf, sc, nullptr, -1);
+    }
+
+    if (request.advanceWidth >= 0) {
+        sc->width = static_cast<int16_t>(std::clamp(request.advanceWidth, 0, 32767));
+        sc->widthset = true;
+    }
+    assignAltUnicodes(sc, request.altUnicodes);
+    SCRefreshTitles(sc);
+    sc->changed = true;
+    sf->changed = true;
+
+    const int activeLayer =
+        (m_impl->fv && m_impl->fv->active_layer >= 0) ? m_impl->fv->active_layer : ly_fore;
+    if (activeLayer >= 0 && activeLayer < sc->layer_cnt) {
+        sc->layers[activeLayer].validation_state = vs_unknown;
+    }
+
+    if (outResult != nullptr) {
+        outResult->glyph = extractGlyphSummary(sc, sc->orig_pos, activeLayer);
+        outResult->fontSummary = extractFontSummary(sf, m_impl->fv, m_impl->currentPath);
     }
     return true;
 }
@@ -832,6 +960,165 @@ bool FontForgeBridge::validateFont(bool force, FontValidationReport* outReport, 
     report.issueGlyphCount = report.issues.size();
     if (outReport != nullptr) {
         *outReport = std::move(report);
+    }
+    return true;
+}
+
+bool FontForgeBridge::importSvgToGlyph(const SvgImportOptions& options, SvgImportResult* outResult,
+                                       QString* outError) {
+    if (!hasOpenFont()) {
+        if (outError) {
+            *outError = QStringLiteral("No font is currently loaded.");
+        }
+        return false;
+    }
+    if (options.svgData.trimmed().isEmpty() && options.strokeSvgData.trimmed().isEmpty()) {
+        if (outError) {
+            *outError = QStringLiteral("SVG input buffer is empty.");
+        }
+        return false;
+    }
+
+    SplineFont* sf = m_impl->sf;
+    if (options.gid < 0 || options.gid >= sf->glyphcnt || sf->glyphs[options.gid] == nullptr) {
+        if (outError) {
+            *outError = QStringLiteral("Target glyph GID %1 does not exist.").arg(options.gid);
+        }
+        return false;
+    }
+
+    SplineChar* sc = sf->glyphs[options.gid];
+    const int activeLayer =
+        (m_impl->fv && m_impl->fv->active_layer >= 0 && m_impl->fv->active_layer < sc->layer_cnt)
+            ? m_impl->fv->active_layer
+            : ly_fore;
+    const int emSize = sf->ascent + sf->descent;
+
+    ImportParams ip;
+    InitImportParams(&ip);
+    ip.scale = options.scaleToEm ? 1 : 0;
+    ip.correct_direction = options.correctDirection ? 1 : 0;
+    ip.simplify = options.simplify ? 1 : 0;
+    ip.clip = 1;
+    ip.dimensions = 0;
+
+    auto interpretBuffer = [&](const QByteArray& rawXml) -> SplineSet* {
+        QByteArray buf = rawXml;
+        SplineSet* parsed = SplinePointListInterpretSVG(
+            nullptr, buf.data(), static_cast<int>(buf.size()), emSize, sf->ascent,
+            sf->strokedfont, &ip);
+        if (parsed == nullptr) {
+            return nullptr;
+        }
+        SplineSet* probe = parsed;
+        while (probe != nullptr && probe->first != nullptr && probe->first->next == nullptr) {
+            probe = probe->next;
+        }
+        if (probe != nullptr && probe->first != nullptr && probe->first->next != nullptr
+            && probe->first->next->order2 != sc->layers[activeLayer].order2) {
+            parsed = SplineSetsConvertOrder(parsed, sc->layers[activeLayer].order2);
+        }
+        return parsed;
+    };
+
+    SplineSet* fillSpl = !options.svgData.trimmed().isEmpty() ? interpretBuffer(options.svgData) : nullptr;
+    SplineSet* strokeSpl = !options.strokeSvgData.trimmed().isEmpty()
+        ? interpretBuffer(options.strokeSvgData)
+        : nullptr;
+
+    if (strokeSpl != nullptr) {
+        // Stroke-only SVG outlines are skipped by FontForge's EntityCharCorrectDir and reflect
+        // across Y; normalize outer/inner ring winding before merging with fills.
+        int changed = 0;
+        strokeSpl = SplineSetsCorrect(strokeSpl, &changed);
+    }
+
+    auto appendSpl = [](SplineSet* a, SplineSet* b) -> SplineSet* {
+        if (a == nullptr) return b;
+        if (b == nullptr) return a;
+        SplineSet* t = a;
+        while (t->next != nullptr) t = t->next;
+        t->next = b;
+        return a;
+    };
+
+    SplineSet* spl = appendSpl(fillSpl, strokeSpl);
+    if (spl == nullptr) {
+        if (outError) {
+            *outError = QStringLiteral(
+                "FontForge could not extract vector outlines from the filtered SVG.");
+        }
+        return false;
+    }
+
+    SplineSet* cutoutSpl = nullptr;
+    if (!options.cutoutSvgData.trimmed().isEmpty()) {
+        cutoutSpl = interpretBuffer(options.cutoutSvgData);
+        if (cutoutSpl != nullptr) {
+            if (options.removeOverlap) {
+                cutoutSpl = SplineSetRemoveOverlap(sc, cutoutSpl, over_remove);
+            }
+            int changed = 0;
+            cutoutSpl = SplineSetsCorrect(cutoutSpl, &changed);
+            for (SplineSet* s = cutoutSpl; s != nullptr; s = s->next) {
+                if (SplinePointListIsClockwise(s) == 1) {
+                    SplineSetReverse(s);
+                }
+            }
+        }
+    }
+
+    if (options.removeOverlap) {
+        spl = SplineSetRemoveOverlap(sc, spl, over_remove);
+    }
+    spl = appendSpl(spl, cutoutSpl);
+
+    int importedContours = 0;
+    SplineSet* tail = nullptr;
+    for (SplineSet* s = spl; s != nullptr; s = s->next) {
+        ++importedContours;
+        tail = s;
+    }
+
+    SCPreserveLayer(sc, activeLayer, false);
+    SplineSet** head = &sc->layers[activeLayer].splines;
+    if (options.replaceExistingContours) {
+        SplinePointListsFree(*head);
+        *head = nullptr;
+    }
+    if (tail != nullptr) {
+        tail->next = *head;
+        *head = spl;
+    }
+
+    if (options.removeOverlap && !options.replaceExistingContours && cutoutSpl == nullptr && *head != nullptr) {
+        *head = SplineSetRemoveOverlap(sc, *head, over_remove);
+    }
+    if (options.correctDirection && *head != nullptr) {
+        int changed = 0;
+        *head = SplineSetsCorrect(*head, &changed);
+    }
+    if (options.roundToInt) {
+        SCRound2Int(sc, activeLayer, 1.0);
+    }
+
+    if (options.updateAdvanceWidth && options.svgWidth > 0.0) {
+        const double rawWidth =
+            (options.scaleToEm && options.svgHeight > 0.0)
+                ? options.svgWidth * (static_cast<double>(emSize) / options.svgHeight)
+                : options.svgWidth;
+        sc->width = static_cast<int16_t>(std::clamp<long>(std::lround(rawWidth), 0L, 32767L));
+        sc->widthset = true;
+    }
+
+    sc->layers[activeLayer].validation_state = vs_unknown;
+    sc->changed = true;
+    sf->changed = true;
+    SCCharChangedUpdate(sc, activeLayer);
+
+    if (outResult != nullptr) {
+        outResult->glyph = extractGlyphSummary(sc, options.gid, activeLayer);
+        outResult->importedContours = importedContours;
     }
     return true;
 }

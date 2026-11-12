@@ -53,6 +53,16 @@ void FontWorker::updateGlyphMetadata(const GlyphMetadataUpdate& update) {
     }
 }
 
+void FontWorker::createGlyph(const CreateGlyphRequest& request) {
+    CreateGlyphResult result;
+    QString error;
+    if (m_bridge->createGlyph(request, &result, &error)) {
+        emit glyphCreated(result);
+    } else {
+        emit glyphCreationFailed(error);
+    }
+}
+
 void FontWorker::updateFontMetadata(const FontMetadataUpdate& update) {
     FontSummary updated;
     QString error;
@@ -70,6 +80,16 @@ void FontWorker::validateFont(bool force) {
         emit fontValidated(report);
     } else {
         emit fontValidationFailed(error);
+    }
+}
+
+void FontWorker::importSvgToGlyph(const SvgImportOptions& options) {
+    SvgImportResult result;
+    QString error;
+    if (m_bridge->importSvgToGlyph(options, &result, &error)) {
+        emit svgImported(result);
+    } else {
+        emit svgImportFailed(error);
     }
 }
 

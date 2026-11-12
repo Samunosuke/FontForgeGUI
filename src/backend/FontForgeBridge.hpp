@@ -32,9 +32,13 @@ public:
     bool exportFont(const ExportOptions& options, QString* outError);
     bool updateGlyphMetadata(const GlyphMetadataUpdate& update, GlyphSummary* outGlyph,
                              QString* outError);
+    bool createGlyph(const CreateGlyphRequest& request, CreateGlyphResult* outResult,
+                     QString* outError);
     bool updateFontMetadata(const FontMetadataUpdate& update, FontSummary* outSummary,
                             QString* outError);
     bool validateFont(bool force, FontValidationReport* outReport, QString* outError);
+    bool importSvgToGlyph(const SvgImportOptions& options, SvgImportResult* outResult,
+                          QString* outError);
     void closeFont();
 
     bool hasOpenFont() const;

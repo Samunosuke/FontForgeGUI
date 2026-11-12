@@ -91,6 +91,23 @@ bool GlyphListModel::updateGlyph(const GlyphSummary& updated) {
     return true;
 }
 
+void GlyphListModel::addGlyph(const GlyphSummary& added, const FontSummary& updatedSummary) {
+    m_summary = updatedSummary;
+    int existingIdx = -1;
+    for (int i = 0; i < m_glyphs.size(); ++i) {
+        if (m_glyphs[i].gid == added.gid) {
+            existingIdx = i;
+            break;
+        }
+    }
+    if (existingIdx >= 0) {
+        m_glyphs[existingIdx] = added;
+    } else {
+        m_glyphs.append(added);
+    }
+    rebuildFilter();
+}
+
 void GlyphListModel::clear() {
     beginResetModel();
     m_summary = FontSummary{};

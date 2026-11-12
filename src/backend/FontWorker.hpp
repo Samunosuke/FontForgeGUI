@@ -25,8 +25,10 @@ public slots:
     void openFont(const QString& path);
     void exportFont(const ExportOptions& options);
     void updateGlyphMetadata(const GlyphMetadataUpdate& update);
+    void createGlyph(const CreateGlyphRequest& request);
     void updateFontMetadata(const FontMetadataUpdate& update);
     void validateFont(bool force);
+    void importSvgToGlyph(const SvgImportOptions& options);
     void closeFont();
 
 signals:
@@ -36,10 +38,14 @@ signals:
     void fontExportFailed(const QString& error);
     void glyphMetadataUpdated(const ffgui::GlyphSummary& glyph);
     void glyphMetadataUpdateFailed(const QString& error);
+    void glyphCreated(const ffgui::CreateGlyphResult& result);
+    void glyphCreationFailed(const QString& error);
     void fontMetadataUpdated(const ffgui::FontSummary& summary);
     void fontMetadataUpdateFailed(const QString& error);
     void fontValidated(const ffgui::FontValidationReport& report);
     void fontValidationFailed(const QString& error);
+    void svgImported(const ffgui::SvgImportResult& result);
+    void svgImportFailed(const QString& error);
     void fontClosed();
     void logMessage(const QString& level, const QString& message);
     void progressUpdated(int current, int total, const QString& status);

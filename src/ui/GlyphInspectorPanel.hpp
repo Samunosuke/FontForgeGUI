@@ -38,10 +38,12 @@ public:
 
     void setFontSummary(const FontSummary& summary);
     void setGlyph(const GlyphSummary* glyph);
+    const GlyphSummary* currentGlyph() const { return m_hasGlyph ? &m_currentGlyph : nullptr; }
     void clear();
 
 signals:
     void glyphMetadataEditRequested(const ffgui::GlyphMetadataUpdate& update);
+    void importSvgRequested();
     void editFontMetadataRequested();
 
 private slots:
@@ -62,6 +64,7 @@ private:
     QLabel* m_editErrorLabel = nullptr;
     QPushButton* m_applyBtn = nullptr;
     QPushButton* m_revertBtn = nullptr;
+    QPushButton* m_importSvgBtn = nullptr;
 
     QLabel* m_gidLabel = nullptr;
     QLabel* m_widthLabel = nullptr;

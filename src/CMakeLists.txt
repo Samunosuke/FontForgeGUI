@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(FontForgeGUI VERSION 0.2.0 LANGUAGES C CXX)
+project(FontForgeGUI VERSION 0.3.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -31,7 +31,7 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTORCC ON)
 
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Xml Svg)
 
 # Ensure binaries find libfontforge.so in the build tree and relative install lib dir
 set(CMAKE_BUILD_RPATH "${CMAKE_CURRENT_BINARY_DIR}/fontforge-build/lib")
@@ -49,6 +49,10 @@ add_library(ffgui_core STATIC
     model/CustomGlyphAreaConfig.cpp
     model/GlyphListModel.hpp
     model/GlyphListModel.cpp
+    model/GlyphMetadataUtils.hpp
+    model/GlyphMetadataUtils.cpp
+    model/SvgSanitizer.hpp
+    model/SvgSanitizer.cpp
 )
 
 target_include_directories(ffgui_core
@@ -61,6 +65,7 @@ target_link_libraries(ffgui_core
         Qt6::Core
         Qt6::Gui
     PRIVATE
+        Qt6::Xml
         fontforge
 )
 
@@ -76,6 +81,10 @@ add_executable(FontForgeGUI
     ui/GlyphGridView.cpp
     ui/GlyphInspectorPanel.hpp
     ui/GlyphInspectorPanel.cpp
+    ui/CreateGlyphDialog.hpp
+    ui/CreateGlyphDialog.cpp
+    ui/ImportSvgDialog.hpp
+    ui/ImportSvgDialog.cpp
     ui/ExportFontDialog.hpp
     ui/ExportFontDialog.cpp
     ui/FontMetadataDialog.hpp
@@ -88,6 +97,7 @@ target_link_libraries(FontForgeGUI
     PRIVATE
         ffgui_core
         Qt6::Widgets
+        Qt6::Svg
 )
 
 target_compile_features(FontForgeGUI PRIVATE cxx_std_20)
@@ -111,4 +121,11 @@ if(BUILD_TESTING)
         TEST_FONTS_DIR="${FONTFORGE_SOURCE_DIR}/tests/fonts"
     )
     add_test(NAME v02_metadata_validation COMMAND test_v02_metadata_validation)
+
+    add_executable(test_v03_svg_import tests/test_v03_svg_import.cpp)
+    target_link_libraries(test_v03_svg_import PRIVATE ffgui_core)
+    target_compile_definitions(test_v03_svg_import PRIVATE
+        TEST_FONTS_DIR="${FONTFORGE_SOURCE_DIR}/tests/fonts"
+    )
+    add_test(NAME v03_svg_import COMMAND test_v03_svg_import)
 endif()

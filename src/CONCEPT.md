@@ -9,17 +9,18 @@ It uses the FontForge core (`libfontforge`, built headless with `ENABLE_GUI=OFF`
 - **License:** GPL-3.0-or-later (required by linking `libfontforge`).
 - **Backend Integration:** Direct linking against headless `libfontforge` via `FontForgeBridge` + `ui_interface` hooks instead of extracting/copying parser code.
 - **Thread Safety:** `libfontforge` relies on global C state and is not thread-safe; all FontForge calls are serialized on a dedicated `FontWorker` thread while the UI consumes immutable snapshots (`FontDocumentSnapshot`) and `QAbstractListModel` (`GlyphListModel`).
-- **Custom Processing Outside FontForge (planned for v0.3):** SVG pre-filtering/sanitization before passing paths to FontForge (`SplinePointListInterpretSVG`), and interactive bitmap-to-vector preview before tracing.
+- **Custom Processing Outside FontForge:** SVG pre-filtering/sanitization (`SvgSanitizer`) before passing geometry to FontForge (`SplinePointListInterpretSVG`), plus interactive bitmap-to-vector preview before tracing (planned/deferred).
 
 ## Features
 
 - Font editing
 - Font exporting
-- Font importing
+- Font importing (including Drag & Drop onto the empty glyph grid)
 - Font validation
 - Font preview
-- Import svg file and convert to font glyph
-- Import icon image and convert to font glyph
+- Create New Glyph (Name, Unicode, Alt Unicodes, Advance Width, optional immediate SVG import)
+- Import SVG file and convert to font glyph (with Drag & Drop, persistent last directory, color filter, and white cutout subtraction)
+- Import icon image and convert to font glyph (planned/deferred)
 - Glyph Metadata Editor with Glyph Preview 
 - Font Metadata Editor 
 - Find Glyph by Unicode, Name, Position
@@ -36,13 +37,14 @@ The UI is designed to be simple and easy to use.
 - **C++20 + Qt 6 Widgets** (`QListView` + `QPainterPath` delegate for grid preview, `QGraphicsView` planned for v0.4 outline editor; QML was evaluated and intentionally rejected in favor of Widgets for complex desktop tables/dialogs and vector editing)
 
 ### Implementation Notes & Open Questions
-- [x] **Font importing (`v0.1`):** `LoadSplineFont` + `FVAppend(_FontViewCreate(...))` via `FontForgeBridge`
+- [x] **Font importing (`v0.1`):** `LoadSplineFont` + `FVAppend(_FontViewCreate(...))` via `FontForgeBridge`, plus Drag & Drop of font files into the empty `GlyphGridView`
 - [x] **Font exporting (`v0.1`):** `GenerateScript` (OTF, TTF, WOFF, WOFF2, UFO, PFB, SVG) and `SFDWrite` (`.sfd`)
 - [x] **Font preview & Find Glyph (`v0.1`):** `SplineSet`/`RefChar` -> `QPainterPath` rendered in virtualized `GlyphListModel` + `GlyphInspectorPanel`, filterable by Unicode, Name, or GID
 - [x] **Font validation (`v0.2`):** `SFValidate` + `validation_state` flags exposed via `FontForgeBridge` and interactive `ValidationPanel` dock
-- [x] **Glyph & Font metadata editors (`v0.2`):** Edit `SplineChar` (`name`, `unicodeenc`, `altuni`) inline in `GlyphInspectorPanel` and `SplineFont` (`fontname`, `familyname`, `fullname`, `weight`, `version`, `copyright`, `ascent`, `descent`, `italicangle`, `upos`, `uwidth`, SFNT `name` table) via `FontMetadataDialog` on `FontWorker`
-- [ ] **SVG filter & import (`v0.3`):** Pre-filter/normalize Inkscape SVGs (strip unnecessary colors/groups/metadata) before calling FontForge SVG import
-- [ ] **Icon image import & trace (`v0.3`):** Grayscale/threshold preview + `potrace` / tracing pipeline into glyph contours
+- [x] **Glyph & Font metadata editors (`v0.2`):** Edit `SplineChar` (`name`, `unicodeenc`, `altuni`) inline in `GlyphInspectorPanel` (sharing validation/formatting via `GlyphMetadataUtils`) and `SplineFont` (`fontname`, `familyname`, `fullname`, `weight`, `version`, `copyright`, `ascent`, `descent`, `italicangle`, `upos`, `uwidth`, SFNT `name` table) via `FontMetadataDialog` on `FontWorker`
+- [x] **Create New Glyph (`v0.3`):** `CreateGlyphDialog` (reusing `GlyphMetadataUtils`: Name, Unicode, Alt Unicodes, Advance Width, plus option to open `ImportSvgDialog` directly after creation) wired to `FontForgeBridge::createGlyph` (`SFMakeChar` / `SFSplineCharCreate` + `SFAddGlyphAndEncode`)
+- [x] **SVG filter & import (`v0.3`):** `SvgSanitizer` (strips editor metadata, hidden/empty nodes, background rects, tiny specks, excludes colors or flattens to `#000000`, extracts strokes and `#ffffff` foreground cutouts) + `ImportSvgDialog` (Original vs. Filtered preview, SVG Drag & Drop, persistent last folder via `QSettings`) + `FontForgeBridge::importSvgToGlyph` (`SplinePointListInterpretSVG` / stroke expansion / overlap removal / cutout subtraction / direction correction)
+- [ ] **Icon image import & trace (optional / deferred):** Grayscale/threshold preview + `potrace` / tracing pipeline into glyph contours
 - [ ] **Font editing / outline editor (`v0.4`):** Interactive `QGraphicsView` canvas mapping Bézier anchors/control handles directly to `SplinePoint`/`SplineSet` mutations on `FontWorker`
 
 ### Milestones
@@ -57,9 +59,11 @@ The UI is designed to be simple and easy to use.
 - [x] Edit Font Metadata
 - [x] Font Validation
 
-#### v0.3
-- [ ] Import SVG filter to reduce unnecessary geometries or colors information
-- [ ] Import Glyph geometry from SVG (created by Inkscape or similar program)
+#### v0.3 (Implemented)
+- [x] Import SVG filter to reduce unnecessary geometries or color information (including white-foreground cutout subtraction & stroke pass handling)
+- [x] Import Glyph geometry from SVG (created by Inkscape or similar program), with persistent last SVG path & SVG Drag & Drop in `ImportSvgDialog`
+- [x] Drag & Drop loading of font files in empty glyph area (`GlyphGridView`)
+- [x] Create New Glyph (`CreateGlyphDialog`: Unicode, Name, Alt Unicodes, Advance Width, optional post-create SVG import)
 
 #### v0.4
 - [ ] Edit Glyph outline (simple and easy to use editor)

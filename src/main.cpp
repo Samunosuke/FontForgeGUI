@@ -6,7 +6,7 @@
 int main(int argc, char* argv[]) {
     QApplication app(argc, argv);
     app.setApplicationName(QStringLiteral("FontForgeGUI"));
-    app.setApplicationVersion(QStringLiteral("0.2.0"));
+    app.setApplicationVersion(QStringLiteral("0.3.0"));
 
     QCommandLineParser parser;
     parser.setApplicationDescription(QStringLiteral("Modern Qt 6 GUI for FontForge"));

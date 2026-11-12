@@ -3,11 +3,13 @@
 #include "backend/FontWorker.hpp"
 #include "model/GlyphListModel.hpp"
 #include "model/UnicodeRangeFilter.hpp"
+#include "ui/CreateGlyphDialog.hpp"
 #include "ui/ExportFontDialog.hpp"
 #include "ui/FontMetadataDialog.hpp"
 #include "ui/GlyphGridDelegate.hpp"
 #include "ui/GlyphGridView.hpp"
 #include "ui/GlyphInspectorPanel.hpp"
+#include "ui/ImportSvgDialog.hpp"
 #include "ui/ValidationPanel.hpp"
 
 #include <QAction>
@@ -44,6 +46,10 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     qRegisterMetaType<GlyphMetadataUpdate>("ffgui::GlyphMetadataUpdate");
     qRegisterMetaType<FontMetadataUpdate>("ffgui::FontMetadataUpdate");
     qRegisterMetaType<FontValidationReport>("ffgui::FontValidationReport");
+    qRegisterMetaType<SvgImportOptions>("ffgui::SvgImportOptions");
+    qRegisterMetaType<SvgImportResult>("ffgui::SvgImportResult");
+    qRegisterMetaType<CreateGlyphRequest>("ffgui::CreateGlyphRequest");
+    qRegisterMetaType<CreateGlyphResult>("ffgui::CreateGlyphResult");
 
     m_areaConfig = CustomGlyphAreaConfig::createDefault();
 
@@ -62,6 +68,8 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     connect(m_worker, &FontWorker::fontLoadFailed, this, &MainWindow::onFontLoadFailed);
     connect(m_worker, &FontWorker::fontExported, this, &MainWindow::onFontExported);
     connect(m_worker, &FontWorker::fontExportFailed, this, &MainWindow::onFontExportFailed);
+    connect(m_worker, &FontWorker::glyphCreated, this, &MainWindow::onGlyphCreated);
+    connect(m_worker, &FontWorker::glyphCreationFailed, this, &MainWindow::onGlyphCreationFailed);
     connect(m_worker, &FontWorker::glyphMetadataUpdated, this,
             &MainWindow::onGlyphMetadataUpdated);
     connect(m_worker, &FontWorker::glyphMetadataUpdateFailed, this,
@@ -72,6 +80,8 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     connect(m_worker, &FontWorker::fontValidated, this, &MainWindow::onFontValidated);
     connect(m_worker, &FontWorker::fontValidationFailed, this,
             &MainWindow::onFontValidationFailed);
+    connect(m_worker, &FontWorker::svgImported, this, &MainWindow::onSvgImported);
+    connect(m_worker, &FontWorker::svgImportFailed, this, &MainWindow::onSvgImportFailed);
     connect(m_worker, &FontWorker::fontClosed, this, &MainWindow::onFontClosed);
     connect(m_worker, &FontWorker::logMessage, this, &MainWindow::onLogMessage);
     connect(m_worker, &FontWorker::progressUpdated, this, &MainWindow::onProgressUpdated);
@@ -246,6 +256,8 @@ void MainWindow::setupUi() {
                 QMetaObject::invokeMethod(m_worker, "updateGlyphMetadata", Qt::QueuedConnection,
                                           Q_ARG(ffgui::GlyphMetadataUpdate, update));
             });
+    connect(m_inspector, &GlyphInspectorPanel::importSvgRequested, this,
+            &MainWindow::onImportSvgClicked);
     connect(m_inspector, &GlyphInspectorPanel::editFontMetadataRequested, this,
             &MainWindow::onEditFontMetadataClicked);
 
@@ -274,6 +286,11 @@ void MainWindow::setupMenusAndToolbar() {
     fileMenu->addAction(tr("E&xit"), QKeySequence::Quit, this, &QWidget::close);
 
     auto* fontMenu = menuBar()->addMenu(tr("F&ont"));
+    m_newGlyphAction = fontMenu->addAction(tr("&New Glyph…"), QKeySequence::New, this,
+                                           &MainWindow::onNewGlyphClicked);
+    m_importSvgAction = fontMenu->addAction(tr("&Import SVG into Glyph…"),
+                                            QKeySequence(QStringLiteral("Ctrl+I")), this,
+                                            &MainWindow::onImportSvgClicked);
     m_fontMetaAction = fontMenu->addAction(tr("Font &Metadata…"),
                                            QKeySequence(QStringLiteral("Ctrl+M")), this,
                                            &MainWindow::onEditFontMetadataClicked);
@@ -292,11 +309,15 @@ void MainWindow::setupMenusAndToolbar() {
     toolbar->addAction(m_exportAction);
     toolbar->addAction(m_closeAction);
     toolbar->addSeparator();
+    toolbar->addAction(m_newGlyphAction);
+    toolbar->addAction(m_importSvgAction);
     toolbar->addAction(m_fontMetaAction);
     toolbar->addAction(m_validateAction);
 
     m_exportAction->setEnabled(false);
     m_closeAction->setEnabled(false);
+    m_newGlyphAction->setEnabled(false);
+    m_importSvgAction->setEnabled(false);
     m_fontMetaAction->setEnabled(false);
     m_validateAction->setEnabled(false);
     m_saveAreasBtn->setEnabled(false);
@@ -367,6 +388,41 @@ void MainWindow::onValidateFontClicked() {
     QMetaObject::invokeMethod(m_worker, "validateFont", Qt::QueuedConnection, Q_ARG(bool, true));
 }
 
+void MainWindow::onNewGlyphClicked() {
+    if (!m_hasOpenFont) {
+        return;
+    }
+    CreateGlyphDialog dlg(m_model->fontSummary(), this);
+    if (dlg.exec() != QDialog::Accepted) {
+        return;
+    }
+    m_openSvgAfterCreate = dlg.openSvgImportAfterCreate();
+    const CreateGlyphRequest req = dlg.glyphRequest();
+    setBusy(true, tr("Creating new glyph…"));
+    QMetaObject::invokeMethod(m_worker, "createGlyph", Qt::QueuedConnection,
+                              Q_ARG(ffgui::CreateGlyphRequest, req));
+}
+
+void MainWindow::onImportSvgClicked() {
+    if (!m_hasOpenFont) {
+        return;
+    }
+    const GlyphSummary* glyph = currentSelectedGlyph();
+    if (glyph == nullptr) {
+        QMessageBox::information(this, tr("Import SVG"),
+                                 tr("Select a glyph in the grid before importing an SVG."));
+        return;
+    }
+    ImportSvgDialog dlg(*glyph, m_model->fontSummary(), QString(), this);
+    if (dlg.exec() != QDialog::Accepted) {
+        return;
+    }
+    const SvgImportOptions opts = dlg.importOptions();
+    setBusy(true, tr("Importing SVG into %1 (#%2)…").arg(glyph->name).arg(glyph->gid));
+    QMetaObject::invokeMethod(m_worker, "importSvgToGlyph", Qt::QueuedConnection,
+                              Q_ARG(ffgui::SvgImportOptions, opts));
+}
+
 void MainWindow::onFontLoaded(const FontDocumentSnapshot& snapshot) {
     setBusy(false);
     m_hasOpenFont = true;
@@ -391,6 +447,7 @@ void MainWindow::onFontLoaded(const FontDocumentSnapshot& snapshot) {
 
     m_exportAction->setEnabled(true);
     m_closeAction->setEnabled(true);
+    m_newGlyphAction->setEnabled(true);
     m_fontMetaAction->setEnabled(true);
     m_validateAction->setEnabled(true);
     m_saveAreasBtn->setEnabled(true);
@@ -428,21 +485,53 @@ void MainWindow::onFontExportFailed(const QString& error) {
     statusBar()->showMessage(tr("Font export failed"), 5000);
 }
 
-void MainWindow::onGlyphMetadataUpdated(const GlyphSummary& glyph) {
+void MainWindow::onGlyphCreated(const CreateGlyphResult& result) {
     setBusy(false);
     m_modified = true;
-    m_model->updateGlyph(glyph);
+    const bool openSvg = m_openSvgAfterCreate;
+    m_openSvgAfterCreate = false;
 
-    const int row = m_model->rowForGid(glyph.gid);
+    m_model->addGlyph(result.glyph, result.fontSummary);
+    m_inspector->setFontSummary(result.fontSummary);
+
+    const int row = m_model->rowForGid(result.glyph.gid);
     if (row >= 0) {
         const QModelIndex idx = m_model->index(row, 0);
         m_gridView->setCurrentIndex(idx);
+        m_gridView->scrollTo(idx);
         m_inspector->setGlyph(m_model->glyphAtRow(row));
+        statusBar()->showMessage(
+            tr("Created glyph #%1 (%2)").arg(result.glyph.gid).arg(result.glyph.name), 5000);
     } else {
-        m_inspector->setGlyph(&glyph);
+        if (m_gridView->selectionModel()) {
+            m_gridView->selectionModel()->clearSelection();
+        }
+        m_inspector->setGlyph(&result.glyph);
+        statusBar()->showMessage(
+            tr("Created glyph #%1 (%2) — hidden by active Glyph Area filter")
+                .arg(result.glyph.gid)
+                .arg(result.glyph.name),
+            6000);
     }
 
+    m_importSvgAction->setEnabled(m_hasOpenFont && currentSelectedGlyph() != nullptr);
     updateWindowTitleAndCounts();
+
+    if (openSvg) {
+        onImportSvgClicked();
+    }
+}
+
+void MainWindow::onGlyphCreationFailed(const QString& error) {
+    m_openSvgAfterCreate = false;
+    setBusy(false);
+    QMessageBox::warning(this, tr("Create Glyph Failed"), error);
+    statusBar()->showMessage(tr("Glyph creation failed"), 4000);
+}
+
+void MainWindow::onGlyphMetadataUpdated(const GlyphSummary& glyph) {
+    setBusy(false);
+    applyUpdatedGlyph(glyph);
     statusBar()->showMessage(
         tr("Updated glyph #%1 (%2)").arg(glyph.gid).arg(glyph.name), 4000);
 }
@@ -490,6 +579,23 @@ void MainWindow::onFontValidationFailed(const QString& error) {
     statusBar()->showMessage(tr("Validation failed"), 4000);
 }
 
+void MainWindow::onSvgImported(const SvgImportResult& result) {
+    setBusy(false);
+    applyUpdatedGlyph(result.glyph);
+    statusBar()->showMessage(
+        tr("Imported %1 SVG contour(s) into glyph #%2 (%3)")
+            .arg(result.importedContours)
+            .arg(result.glyph.gid)
+            .arg(result.glyph.name),
+        5000);
+}
+
+void MainWindow::onSvgImportFailed(const QString& error) {
+    setBusy(false);
+    QMessageBox::warning(this, tr("SVG Import Failed"), error);
+    statusBar()->showMessage(tr("SVG import failed"), 4000);
+}
+
 void MainWindow::onFontClosed() {
     m_hasOpenFont = false;
     m_modified = false;
@@ -500,6 +606,8 @@ void MainWindow::onFontClosed() {
     m_validationPanel->setFontAvailable(false);
     m_exportAction->setEnabled(false);
     m_closeAction->setEnabled(false);
+    m_newGlyphAction->setEnabled(false);
+    m_importSvgAction->setEnabled(false);
     m_fontMetaAction->setEnabled(false);
     m_validateAction->setEnabled(false);
     m_saveAreasBtn->setEnabled(false);
@@ -604,13 +712,9 @@ void MainWindow::onZoomChanged(int value) {
 }
 
 void MainWindow::onGlyphSelectionChanged() {
-    const QModelIndexList selected = m_gridView->selectionModel()->selectedIndexes();
-    if (selected.isEmpty()) {
-        m_inspector->setGlyph(nullptr);
-        return;
-    }
-    const GlyphSummary* g = m_model->glyphAtRow(selected.first().row());
+    const GlyphSummary* g = currentSelectedGlyph();
     m_inspector->setGlyph(g);
+    m_importSvgAction->setEnabled(m_hasOpenFont && g != nullptr);
 }
 
 void MainWindow::onValidationGlyphSelected(int gid) {
@@ -631,6 +735,8 @@ void MainWindow::setBusy(bool busy, const QString& message) {
     m_openAction->setEnabled(!busy);
     m_exportAction->setEnabled(!busy && m_hasOpenFont);
     m_closeAction->setEnabled(!busy && m_hasOpenFont);
+    m_newGlyphAction->setEnabled(!busy && m_hasOpenFont);
+    m_importSvgAction->setEnabled(!busy && m_hasOpenFont && currentSelectedGlyph() != nullptr);
     m_fontMetaAction->setEnabled(!busy && m_hasOpenFont);
     m_validateAction->setEnabled(!busy && m_hasOpenFont);
     if (busy) {
@@ -682,7 +788,7 @@ void MainWindow::applyCurrentAreaFilter() {
 
 void MainWindow::updateWindowTitleAndCounts() {
     if (!m_hasOpenFont) {
-        setWindowTitle(QStringLiteral("FontForgeGUI v0.2"));
+        setWindowTitle(QStringLiteral("FontForgeGUI v0.3"));
         m_countLabel->setText(tr("0 glyphs"));
         return;
     }
@@ -692,9 +798,35 @@ void MainWindow::updateWindowTitleAndCounts() {
                           : (!s.fontName.isEmpty() ? s.fontName
                                                    : QFileInfo(m_currentFontPath).fileName());
     const QString dirtyPrefix = m_modified ? QStringLiteral("* ") : QString();
-    setWindowTitle(QStringLiteral("%1%2 — FontForgeGUI v0.2").arg(dirtyPrefix, label));
+    setWindowTitle(QStringLiteral("%1%2 — FontForgeGUI v0.3").arg(dirtyPrefix, label));
     m_countLabel->setText(
         tr("Showing %1 / %2 glyphs").arg(m_model->filteredGlyphCount()).arg(m_model->totalGlyphCount()));
+}
+
+void MainWindow::applyUpdatedGlyph(const GlyphSummary& glyph) {
+    m_modified = true;
+    m_model->updateGlyph(glyph);
+
+    const int row = m_model->rowForGid(glyph.gid);
+    if (row >= 0) {
+        const QModelIndex idx = m_model->index(row, 0);
+        m_gridView->setCurrentIndex(idx);
+        m_inspector->setGlyph(m_model->glyphAtRow(row));
+    } else {
+        m_inspector->setGlyph(&glyph);
+    }
+    m_importSvgAction->setEnabled(m_hasOpenFont && currentSelectedGlyph() != nullptr);
+    updateWindowTitleAndCounts();
+}
+
+const GlyphSummary* MainWindow::currentSelectedGlyph() const {
+    if (m_gridView && m_gridView->selectionModel()) {
+        const QModelIndexList selected = m_gridView->selectionModel()->selectedIndexes();
+        if (!selected.isEmpty()) {
+            return m_model->glyphAtRow(selected.first().row());
+        }
+    }
+    return m_inspector ? m_inspector->currentGlyph() : nullptr;
 }
 
 void MainWindow::persistAreaConfigIfOpen(bool showStatus) {
