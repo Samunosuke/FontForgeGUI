@@ -6,14 +6,173 @@
 #include <QFileInfo>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QLatin1StringView>
 #include <QSettings>
 #include <QString>
 
 namespace ffgui {
 
+namespace SettingsKeys {
+    inline constexpr QLatin1StringView Organization{"FontForgeGUI"};
+    inline constexpr QLatin1StringView Application{"FontForgeGUI"};
+    inline constexpr QLatin1StringView LastFontDir{"lastFontDir"};
+    inline constexpr QLatin1StringView DefaultImportOptions{"defaultImportOptions"};
+} // namespace SettingsKeys
+
+namespace ImportOptionKeys {
+    inline constexpr QLatin1StringView PlacementMode{"placementMode"};
+    inline constexpr QLatin1StringView ScaleToEm{"scaleToEm"};
+    inline constexpr QLatin1StringView ScaleFactor{"scaleFactor"};
+    inline constexpr QLatin1StringView Simplify{"simplify"};
+    inline constexpr QLatin1StringView CorrectDirection{"correctDirection"};
+    inline constexpr QLatin1StringView RemoveOverlap{"removeOverlap"};
+    inline constexpr QLatin1StringView RoundToInt{"roundToInt"};
+    inline constexpr QLatin1StringView MarginRatio{"marginRatio"};
+    inline constexpr QLatin1StringView OffsetX{"offsetX"};
+    inline constexpr QLatin1StringView OffsetY{"offsetY"};
+    inline constexpr QLatin1StringView NormalizeToBlackFill{"normalizeToBlackFill"};
+    inline constexpr QLatin1StringView WhiteAsCutout{"whiteAsCutout"};
+    inline constexpr QLatin1StringView KeepStrokes{"keepStrokes"};
+    inline constexpr QLatin1StringView StripTinyPaths{"stripTinyPaths"};
+    inline constexpr QLatin1StringView MinGeometryExtent{"minGeometryExtent"};
+    inline constexpr QLatin1StringView UseAlpha{"useAlpha"};
+    inline constexpr QLatin1StringView BitmapThreshold{"bitmapThreshold"};
+    inline constexpr QLatin1StringView InvertBitmap{"invertBitmap"};
+    inline constexpr QLatin1StringView MinSpeckleArea{"minSpeckleArea"};
+    inline constexpr QLatin1StringView CurveSmoothing{"curveSmoothing"};
+} // namespace ImportOptionKeys
+
+inline GlyphPlacementMode parsePlacementMode(const QString& str) {
+    const QString s = str.toLower();
+    if (s == QStringLiteral("baseline") || s == QStringLiteral("baselinecentered")) {
+        return GlyphPlacementMode::BaselineCentered;
+    }
+    if (s == QStringLiteral("centerinascent") || s == QStringLiteral("ascent") || s == QStringLiteral("center-ascent")) {
+        return GlyphPlacementMode::CenterInAscent;
+    }
+    if (s == QStringLiteral("centerinem") || s == QStringLiteral("em") || s == QStringLiteral("center-em")) {
+        return GlyphPlacementMode::CenterInEm;
+    }
+    if (s == QStringLiteral("originalsvgcoords") || s == QStringLiteral("raw") || s == QStringLiteral("original")) {
+        return GlyphPlacementMode::OriginalSvgCoords;
+    }
+    return GlyphPlacementMode::AutoAspectRatio;
+}
+
+inline QString placementModeToString(GlyphPlacementMode mode) {
+    switch (mode) {
+    case GlyphPlacementMode::BaselineCentered:
+        return QStringLiteral("BaselineCentered");
+    case GlyphPlacementMode::CenterInAscent:
+        return QStringLiteral("CenterInAscent");
+    case GlyphPlacementMode::CenterInEm:
+        return QStringLiteral("CenterInEm");
+    case GlyphPlacementMode::OriginalSvgCoords:
+        return QStringLiteral("OriginalSvgCoords");
+    default:
+        return QStringLiteral("AutoAspectRatio");
+    }
+}
+
+inline SvgImportOptions importOptionsFromJson(const QJsonObject& obj,
+                                              const SvgImportOptions& fallback = SvgImportOptions{}) {
+    SvgImportOptions opts = fallback;
+    if (obj.contains(ImportOptionKeys::PlacementMode)) {
+        const QJsonValue val = obj.value(ImportOptionKeys::PlacementMode);
+        if (val.isString()) {
+            opts.placementMode = parsePlacementMode(val.toString());
+        } else if (val.isDouble()) {
+            opts.placementMode = static_cast<GlyphPlacementMode>(val.toInt(static_cast<int>(opts.placementMode)));
+        }
+    }
+    if (obj.contains(ImportOptionKeys::ScaleFactor)) {
+        opts.scaleFactor = obj.value(ImportOptionKeys::ScaleFactor).toDouble(opts.scaleFactor);
+    }
+    if (obj.contains(ImportOptionKeys::ScaleToEm)) {
+        opts.scaleToEm = obj.value(ImportOptionKeys::ScaleToEm).toBool(opts.scaleToEm);
+    }
+    if (obj.contains(ImportOptionKeys::Simplify)) {
+        opts.simplify = obj.value(ImportOptionKeys::Simplify).toBool(opts.simplify);
+    }
+    if (obj.contains(ImportOptionKeys::CorrectDirection)) {
+        opts.correctDirection = obj.value(ImportOptionKeys::CorrectDirection).toBool(opts.correctDirection);
+    }
+    if (obj.contains(ImportOptionKeys::RemoveOverlap)) {
+        opts.removeOverlap = obj.value(ImportOptionKeys::RemoveOverlap).toBool(opts.removeOverlap);
+    }
+    if (obj.contains(ImportOptionKeys::RoundToInt)) {
+        opts.roundToInt = obj.value(ImportOptionKeys::RoundToInt).toBool(opts.roundToInt);
+    }
+    if (obj.contains(ImportOptionKeys::MarginRatio)) {
+        opts.marginRatio = obj.value(ImportOptionKeys::MarginRatio).toDouble(opts.marginRatio);
+    }
+    if (obj.contains(ImportOptionKeys::OffsetX)) {
+        opts.offsetX = obj.value(ImportOptionKeys::OffsetX).toDouble(opts.offsetX);
+    }
+    if (obj.contains(ImportOptionKeys::OffsetY)) {
+        opts.offsetY = obj.value(ImportOptionKeys::OffsetY).toDouble(opts.offsetY);
+    }
+    if (obj.contains(ImportOptionKeys::NormalizeToBlackFill)) {
+        opts.normalizeToBlackFill = obj.value(ImportOptionKeys::NormalizeToBlackFill).toBool(opts.normalizeToBlackFill);
+    }
+    if (obj.contains(ImportOptionKeys::WhiteAsCutout)) {
+        opts.whiteAsCutout = obj.value(ImportOptionKeys::WhiteAsCutout).toBool(opts.whiteAsCutout);
+    }
+    if (obj.contains(ImportOptionKeys::KeepStrokes)) {
+        opts.keepStrokes = obj.value(ImportOptionKeys::KeepStrokes).toBool(opts.keepStrokes);
+    }
+    if (obj.contains(ImportOptionKeys::StripTinyPaths)) {
+        opts.stripTinyPaths = obj.value(ImportOptionKeys::StripTinyPaths).toBool(opts.stripTinyPaths);
+    }
+    if (obj.contains(ImportOptionKeys::MinGeometryExtent)) {
+        opts.minGeometryExtent = obj.value(ImportOptionKeys::MinGeometryExtent).toDouble(opts.minGeometryExtent);
+    }
+    if (obj.contains(ImportOptionKeys::UseAlpha)) {
+        opts.useAlpha = obj.value(ImportOptionKeys::UseAlpha).toBool(opts.useAlpha);
+    }
+    if (obj.contains(ImportOptionKeys::BitmapThreshold)) {
+        opts.bitmapThreshold = obj.value(ImportOptionKeys::BitmapThreshold).toInt(opts.bitmapThreshold);
+    }
+    if (obj.contains(ImportOptionKeys::InvertBitmap)) {
+        opts.invertBitmap = obj.value(ImportOptionKeys::InvertBitmap).toBool(opts.invertBitmap);
+    }
+    if (obj.contains(ImportOptionKeys::MinSpeckleArea)) {
+        opts.minSpeckleArea = obj.value(ImportOptionKeys::MinSpeckleArea).toInt(opts.minSpeckleArea);
+    }
+    if (obj.contains(ImportOptionKeys::CurveSmoothing)) {
+        opts.curveSmoothing = obj.value(ImportOptionKeys::CurveSmoothing).toDouble(opts.curveSmoothing);
+    }
+    return opts;
+}
+
+inline QJsonObject importOptionsToJson(const SvgImportOptions& opts) {
+    QJsonObject obj;
+    obj.insert(ImportOptionKeys::PlacementMode, placementModeToString(opts.placementMode));
+    obj.insert(ImportOptionKeys::ScaleFactor, opts.scaleFactor);
+    obj.insert(ImportOptionKeys::ScaleToEm, opts.scaleToEm);
+    obj.insert(ImportOptionKeys::Simplify, opts.simplify);
+    obj.insert(ImportOptionKeys::CorrectDirection, opts.correctDirection);
+    obj.insert(ImportOptionKeys::RemoveOverlap, opts.removeOverlap);
+    obj.insert(ImportOptionKeys::RoundToInt, opts.roundToInt);
+    obj.insert(ImportOptionKeys::MarginRatio, opts.marginRatio);
+    obj.insert(ImportOptionKeys::OffsetX, opts.offsetX);
+    obj.insert(ImportOptionKeys::OffsetY, opts.offsetY);
+    obj.insert(ImportOptionKeys::NormalizeToBlackFill, opts.normalizeToBlackFill);
+    obj.insert(ImportOptionKeys::WhiteAsCutout, opts.whiteAsCutout);
+    obj.insert(ImportOptionKeys::KeepStrokes, opts.keepStrokes);
+    obj.insert(ImportOptionKeys::StripTinyPaths, opts.stripTinyPaths);
+    obj.insert(ImportOptionKeys::MinGeometryExtent, opts.minGeometryExtent);
+    obj.insert(ImportOptionKeys::UseAlpha, opts.useAlpha);
+    obj.insert(ImportOptionKeys::BitmapThreshold, opts.bitmapThreshold);
+    obj.insert(ImportOptionKeys::InvertBitmap, opts.invertBitmap);
+    obj.insert(ImportOptionKeys::MinSpeckleArea, opts.minSpeckleArea);
+    obj.insert(ImportOptionKeys::CurveSmoothing, opts.curveSmoothing);
+    return obj;
+}
+
 inline QString loadLastFontDirectory() {
-    QSettings settings(QStringLiteral("FontForgeGUI"), QStringLiteral("FontForgeGUI"));
-    const QString dir = settings.value(QStringLiteral("lastFontDir")).toString();
+    QSettings settings(SettingsKeys::Organization, SettingsKeys::Application);
+    const QString dir = settings.value(SettingsKeys::LastFontDir).toString();
     if (!dir.isEmpty() && QDir(dir).exists()) {
         return dir;
     }
@@ -27,118 +186,34 @@ inline void saveLastFontDirectory(const QString& filePathOrDir) {
     const QFileInfo fi(filePathOrDir);
     const QString dir = fi.isDir() ? fi.absoluteFilePath() : fi.absolutePath();
     if (!dir.isEmpty() && QDir(dir).exists()) {
-        QSettings settings(QStringLiteral("FontForgeGUI"), QStringLiteral("FontForgeGUI"));
-        settings.setValue(QStringLiteral("lastFontDir"), dir);
+        QSettings settings(SettingsKeys::Organization, SettingsKeys::Application);
+        settings.setValue(SettingsKeys::LastFontDir, dir);
     }
 }
 
 inline SvgImportOptions loadDefaultImportOptions() {
-    SvgImportOptions opts;
-    QSettings settings(QStringLiteral("FontForgeGUI"), QStringLiteral("FontForgeGUI"));
-    const QString jsonStr = settings.value(QStringLiteral("defaultImportOptions")).toString();
+    QSettings settings(SettingsKeys::Organization, SettingsKeys::Application);
+    const QString jsonStr = settings.value(SettingsKeys::DefaultImportOptions).toString();
     if (jsonStr.isEmpty()) {
-        return opts;
+        return {};
     }
     const QJsonDocument doc = QJsonDocument::fromJson(jsonStr.toUtf8());
     if (!doc.isObject()) {
-        return opts;
+        return {};
     }
-    const QJsonObject obj = doc.object();
-    if (obj.contains(QStringLiteral("placementMode"))) {
-        opts.placementMode = static_cast<GlyphPlacementMode>(obj.value(QStringLiteral("placementMode")).toInt(static_cast<int>(opts.placementMode)));
-    }
-    if (obj.contains(QStringLiteral("scaleToEm"))) {
-        opts.scaleToEm = obj.value(QStringLiteral("scaleToEm")).toBool(opts.scaleToEm);
-    }
-    if (obj.contains(QStringLiteral("scaleFactor"))) {
-        opts.scaleFactor = obj.value(QStringLiteral("scaleFactor")).toDouble(opts.scaleFactor);
-    }
-    if (obj.contains(QStringLiteral("simplify"))) {
-        opts.simplify = obj.value(QStringLiteral("simplify")).toBool(opts.simplify);
-    }
-    if (obj.contains(QStringLiteral("correctDirection"))) {
-        opts.correctDirection = obj.value(QStringLiteral("correctDirection")).toBool(opts.correctDirection);
-    }
-    if (obj.contains(QStringLiteral("removeOverlap"))) {
-        opts.removeOverlap = obj.value(QStringLiteral("removeOverlap")).toBool(opts.removeOverlap);
-    }
-    if (obj.contains(QStringLiteral("roundToInt"))) {
-        opts.roundToInt = obj.value(QStringLiteral("roundToInt")).toBool(opts.roundToInt);
-    }
-    if (obj.contains(QStringLiteral("marginRatio"))) {
-        opts.marginRatio = obj.value(QStringLiteral("marginRatio")).toDouble(opts.marginRatio);
-    }
-    if (obj.contains(QStringLiteral("offsetX"))) {
-        opts.offsetX = obj.value(QStringLiteral("offsetX")).toDouble(opts.offsetX);
-    }
-    if (obj.contains(QStringLiteral("offsetY"))) {
-        opts.offsetY = obj.value(QStringLiteral("offsetY")).toDouble(opts.offsetY);
-    }
-    if (obj.contains(QStringLiteral("normalizeToBlackFill"))) {
-        opts.normalizeToBlackFill = obj.value(QStringLiteral("normalizeToBlackFill")).toBool(opts.normalizeToBlackFill);
-    }
-    if (obj.contains(QStringLiteral("whiteAsCutout"))) {
-        opts.whiteAsCutout = obj.value(QStringLiteral("whiteAsCutout")).toBool(opts.whiteAsCutout);
-    }
-    if (obj.contains(QStringLiteral("keepStrokes"))) {
-        opts.keepStrokes = obj.value(QStringLiteral("keepStrokes")).toBool(opts.keepStrokes);
-    }
-    if (obj.contains(QStringLiteral("stripTinyPaths"))) {
-        opts.stripTinyPaths = obj.value(QStringLiteral("stripTinyPaths")).toBool(opts.stripTinyPaths);
-    }
-    if (obj.contains(QStringLiteral("minGeometryExtent"))) {
-        opts.minGeometryExtent = obj.value(QStringLiteral("minGeometryExtent")).toDouble(opts.minGeometryExtent);
-    }
-    if (obj.contains(QStringLiteral("useAlpha"))) {
-        opts.useAlpha = obj.value(QStringLiteral("useAlpha")).toBool(opts.useAlpha);
-    }
-    if (obj.contains(QStringLiteral("bitmapThreshold"))) {
-        opts.bitmapThreshold = obj.value(QStringLiteral("bitmapThreshold")).toInt(opts.bitmapThreshold);
-    }
-    if (obj.contains(QStringLiteral("invertBitmap"))) {
-        opts.invertBitmap = obj.value(QStringLiteral("invertBitmap")).toBool(opts.invertBitmap);
-    }
-    if (obj.contains(QStringLiteral("minSpeckleArea"))) {
-        opts.minSpeckleArea = obj.value(QStringLiteral("minSpeckleArea")).toInt(opts.minSpeckleArea);
-    }
-    if (obj.contains(QStringLiteral("curveSmoothing"))) {
-        opts.curveSmoothing = obj.value(QStringLiteral("curveSmoothing")).toDouble(opts.curveSmoothing);
-    }
-    return opts;
+    return importOptionsFromJson(doc.object());
 }
 
 inline void saveDefaultImportOptions(const SvgImportOptions& opts) {
-    QJsonObject obj;
-    obj.insert(QStringLiteral("placementMode"), static_cast<int>(opts.placementMode));
-    obj.insert(QStringLiteral("scaleToEm"), opts.scaleToEm);
-    obj.insert(QStringLiteral("scaleFactor"), opts.scaleFactor);
-    obj.insert(QStringLiteral("simplify"), opts.simplify);
-    obj.insert(QStringLiteral("correctDirection"), opts.correctDirection);
-    obj.insert(QStringLiteral("removeOverlap"), opts.removeOverlap);
-    obj.insert(QStringLiteral("roundToInt"), opts.roundToInt);
-    obj.insert(QStringLiteral("marginRatio"), opts.marginRatio);
-    obj.insert(QStringLiteral("offsetX"), opts.offsetX);
-    obj.insert(QStringLiteral("offsetY"), opts.offsetY);
-    obj.insert(QStringLiteral("normalizeToBlackFill"), opts.normalizeToBlackFill);
-    obj.insert(QStringLiteral("whiteAsCutout"), opts.whiteAsCutout);
-    obj.insert(QStringLiteral("keepStrokes"), opts.keepStrokes);
-    obj.insert(QStringLiteral("stripTinyPaths"), opts.stripTinyPaths);
-    obj.insert(QStringLiteral("minGeometryExtent"), opts.minGeometryExtent);
-    obj.insert(QStringLiteral("useAlpha"), opts.useAlpha);
-    obj.insert(QStringLiteral("bitmapThreshold"), opts.bitmapThreshold);
-    obj.insert(QStringLiteral("invertBitmap"), opts.invertBitmap);
-    obj.insert(QStringLiteral("minSpeckleArea"), opts.minSpeckleArea);
-    obj.insert(QStringLiteral("curveSmoothing"), opts.curveSmoothing);
-
-    QSettings settings(QStringLiteral("FontForgeGUI"), QStringLiteral("FontForgeGUI"));
-    settings.setValue(QStringLiteral("defaultImportOptions"),
+    const QJsonObject obj = importOptionsToJson(opts);
+    QSettings settings(SettingsKeys::Organization, SettingsKeys::Application);
+    settings.setValue(SettingsKeys::DefaultImportOptions,
                       QString::fromUtf8(QJsonDocument(obj).toJson(QJsonDocument::Compact)));
 }
 
 inline void resetDefaultImportOptions() {
-    QSettings settings(QStringLiteral("FontForgeGUI"), QStringLiteral("FontForgeGUI"));
-    settings.remove(QStringLiteral("defaultImportOptions"));
+    QSettings settings(SettingsKeys::Organization, SettingsKeys::Application);
+    settings.remove(SettingsKeys::DefaultImportOptions);
 }
 
 } // namespace ffgui
-

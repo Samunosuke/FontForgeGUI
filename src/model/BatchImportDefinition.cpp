@@ -1,4 +1,5 @@
 #include "model/BatchImportDefinition.hpp"
+#include "model/FontSettingsUtils.hpp"
 
 #include <QDir>
 #include <QFile>
@@ -6,9 +7,21 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QLatin1StringView>
 #include <QRegularExpression>
 
 namespace ffgui {
+
+namespace DefinitionKeys {
+    inline constexpr QLatin1StringView OverwriteExisting{"overwriteExisting"};
+    inline constexpr QLatin1StringView Defaults{"defaults"};
+    inline constexpr QLatin1StringView Glyphs{"glyphs"};
+    inline constexpr QLatin1StringView File{"file"};
+    inline constexpr QLatin1StringView Path{"path"};
+    inline constexpr QLatin1StringView Unicode{"unicode"};
+    inline constexpr QLatin1StringView Name{"name"};
+    inline constexpr QLatin1StringView Options{"options"};
+} // namespace DefinitionKeys
 
 namespace {
 
@@ -29,128 +42,6 @@ int32_t parseUnicodeValue(const QJsonValue& val) {
         }
     }
     return -1;
-}
-
-GlyphPlacementMode parsePlacementMode(const QString& str) {
-    const QString s = str.toLower();
-    if (s == QStringLiteral("baseline") || s == QStringLiteral("baselinecentered")) {
-        return GlyphPlacementMode::BaselineCentered;
-    }
-    if (s == QStringLiteral("centerinascent") || s == QStringLiteral("ascent") || s == QStringLiteral("center-ascent")) {
-        return GlyphPlacementMode::CenterInAscent;
-    }
-    if (s == QStringLiteral("centerinem") || s == QStringLiteral("em") || s == QStringLiteral("center-em")) {
-        return GlyphPlacementMode::CenterInEm;
-    }
-    if (s == QStringLiteral("originalsvgcoords") || s == QStringLiteral("raw") || s == QStringLiteral("original")) {
-        return GlyphPlacementMode::OriginalSvgCoords;
-    }
-    return GlyphPlacementMode::AutoAspectRatio;
-}
-
-QString placementModeToString(GlyphPlacementMode mode) {
-    switch (mode) {
-    case GlyphPlacementMode::BaselineCentered:
-        return QStringLiteral("BaselineCentered");
-    case GlyphPlacementMode::CenterInAscent:
-        return QStringLiteral("CenterInAscent");
-    case GlyphPlacementMode::CenterInEm:
-        return QStringLiteral("CenterInEm");
-    case GlyphPlacementMode::OriginalSvgCoords:
-        return QStringLiteral("OriginalSvgCoords");
-    default:
-        return QStringLiteral("AutoAspectRatio");
-    }
-}
-
-SvgImportOptions parseOptions(const QJsonObject& obj, const SvgImportOptions& fallback) {
-    SvgImportOptions opts = fallback;
-    if (obj.contains(QStringLiteral("placementMode"))) {
-        opts.placementMode = parsePlacementMode(obj.value(QStringLiteral("placementMode")).toString());
-    }
-    if (obj.contains(QStringLiteral("scaleFactor"))) {
-        opts.scaleFactor = obj.value(QStringLiteral("scaleFactor")).toDouble(opts.scaleFactor);
-    }
-    if (obj.contains(QStringLiteral("scaleToEm"))) {
-        opts.scaleToEm = obj.value(QStringLiteral("scaleToEm")).toBool(opts.scaleToEm);
-    }
-    if (obj.contains(QStringLiteral("simplify"))) {
-        opts.simplify = obj.value(QStringLiteral("simplify")).toBool(opts.simplify);
-    }
-    if (obj.contains(QStringLiteral("correctDirection"))) {
-        opts.correctDirection = obj.value(QStringLiteral("correctDirection")).toBool(opts.correctDirection);
-    }
-    if (obj.contains(QStringLiteral("removeOverlap"))) {
-        opts.removeOverlap = obj.value(QStringLiteral("removeOverlap")).toBool(opts.removeOverlap);
-    }
-    if (obj.contains(QStringLiteral("roundToInt"))) {
-        opts.roundToInt = obj.value(QStringLiteral("roundToInt")).toBool(opts.roundToInt);
-    }
-    if (obj.contains(QStringLiteral("marginRatio"))) {
-        opts.marginRatio = obj.value(QStringLiteral("marginRatio")).toDouble(opts.marginRatio);
-    }
-    if (obj.contains(QStringLiteral("offsetX"))) {
-        opts.offsetX = obj.value(QStringLiteral("offsetX")).toDouble(opts.offsetX);
-    }
-    if (obj.contains(QStringLiteral("offsetY"))) {
-        opts.offsetY = obj.value(QStringLiteral("offsetY")).toDouble(opts.offsetY);
-    }
-    if (obj.contains(QStringLiteral("normalizeToBlackFill"))) {
-        opts.normalizeToBlackFill = obj.value(QStringLiteral("normalizeToBlackFill")).toBool(opts.normalizeToBlackFill);
-    }
-    if (obj.contains(QStringLiteral("whiteAsCutout"))) {
-        opts.whiteAsCutout = obj.value(QStringLiteral("whiteAsCutout")).toBool(opts.whiteAsCutout);
-    }
-    if (obj.contains(QStringLiteral("keepStrokes"))) {
-        opts.keepStrokes = obj.value(QStringLiteral("keepStrokes")).toBool(opts.keepStrokes);
-    }
-    if (obj.contains(QStringLiteral("stripTinyPaths"))) {
-        opts.stripTinyPaths = obj.value(QStringLiteral("stripTinyPaths")).toBool(opts.stripTinyPaths);
-    }
-    if (obj.contains(QStringLiteral("minGeometryExtent"))) {
-        opts.minGeometryExtent = obj.value(QStringLiteral("minGeometryExtent")).toDouble(opts.minGeometryExtent);
-    }
-    if (obj.contains(QStringLiteral("useAlpha"))) {
-        opts.useAlpha = obj.value(QStringLiteral("useAlpha")).toBool(opts.useAlpha);
-    }
-    if (obj.contains(QStringLiteral("bitmapThreshold"))) {
-        opts.bitmapThreshold = obj.value(QStringLiteral("bitmapThreshold")).toInt(opts.bitmapThreshold);
-    }
-    if (obj.contains(QStringLiteral("invertBitmap"))) {
-        opts.invertBitmap = obj.value(QStringLiteral("invertBitmap")).toBool(opts.invertBitmap);
-    }
-    if (obj.contains(QStringLiteral("minSpeckleArea"))) {
-        opts.minSpeckleArea = obj.value(QStringLiteral("minSpeckleArea")).toInt(opts.minSpeckleArea);
-    }
-    if (obj.contains(QStringLiteral("curveSmoothing"))) {
-        opts.curveSmoothing = obj.value(QStringLiteral("curveSmoothing")).toDouble(opts.curveSmoothing);
-    }
-    return opts;
-}
-
-QJsonObject serializeOptions(const SvgImportOptions& opts) {
-    QJsonObject obj;
-    obj.insert(QStringLiteral("placementMode"), placementModeToString(opts.placementMode));
-    obj.insert(QStringLiteral("scaleFactor"), opts.scaleFactor);
-    obj.insert(QStringLiteral("scaleToEm"), opts.scaleToEm);
-    obj.insert(QStringLiteral("simplify"), opts.simplify);
-    obj.insert(QStringLiteral("correctDirection"), opts.correctDirection);
-    obj.insert(QStringLiteral("removeOverlap"), opts.removeOverlap);
-    obj.insert(QStringLiteral("roundToInt"), opts.roundToInt);
-    obj.insert(QStringLiteral("marginRatio"), opts.marginRatio);
-    obj.insert(QStringLiteral("offsetX"), opts.offsetX);
-    obj.insert(QStringLiteral("offsetY"), opts.offsetY);
-    obj.insert(QStringLiteral("normalizeToBlackFill"), opts.normalizeToBlackFill);
-    obj.insert(QStringLiteral("whiteAsCutout"), opts.whiteAsCutout);
-    obj.insert(QStringLiteral("keepStrokes"), opts.keepStrokes);
-    obj.insert(QStringLiteral("stripTinyPaths"), opts.stripTinyPaths);
-    obj.insert(QStringLiteral("minGeometryExtent"), opts.minGeometryExtent);
-    obj.insert(QStringLiteral("useAlpha"), opts.useAlpha);
-    obj.insert(QStringLiteral("bitmapThreshold"), opts.bitmapThreshold);
-    obj.insert(QStringLiteral("invertBitmap"), opts.invertBitmap);
-    obj.insert(QStringLiteral("minSpeckleArea"), opts.minSpeckleArea);
-    obj.insert(QStringLiteral("curveSmoothing"), opts.curveSmoothing);
-    return obj;
 }
 
 } // namespace
@@ -200,21 +91,21 @@ bool BatchImportDefinition::fromJson(const QByteArray& jsonData, const QString& 
 
     const QJsonObject root = doc.object();
     BatchImportJob job;
-    job.overwriteExisting = root.value(QStringLiteral("overwriteExisting")).toBool(false);
+    job.overwriteExisting = root.value(DefinitionKeys::OverwriteExisting).toBool(false);
 
-    if (root.contains(QStringLiteral("defaults")) && root.value(QStringLiteral("defaults")).isObject()) {
-        job.defaultOptions = parseOptions(root.value(QStringLiteral("defaults")).toObject(), job.defaultOptions);
+    if (root.contains(DefinitionKeys::Defaults) && root.value(DefinitionKeys::Defaults).isObject()) {
+        job.defaultOptions = importOptionsFromJson(root.value(DefinitionKeys::Defaults).toObject(), job.defaultOptions);
     }
 
-    const QJsonArray glyphsArr = root.value(QStringLiteral("glyphs")).toArray();
+    const QJsonArray glyphsArr = root.value(DefinitionKeys::Glyphs).toArray();
     for (const QJsonValue& gVal : glyphsArr) {
         if (!gVal.isObject()) {
             continue;
         }
         const QJsonObject gObj = gVal.toObject();
-        QString relPath = gObj.value(QStringLiteral("file")).toString().trimmed();
+        QString relPath = gObj.value(DefinitionKeys::File).toString().trimmed();
         if (relPath.isEmpty()) {
-            relPath = gObj.value(QStringLiteral("path")).toString().trimmed();
+            relPath = gObj.value(DefinitionKeys::Path).toString().trimmed();
         }
         if (relPath.isEmpty()) {
             continue;
@@ -227,11 +118,11 @@ bool BatchImportDefinition::fromJson(const QByteArray& jsonData, const QString& 
 
         BatchImportItem item;
         item.filePath = fullPath;
-        item.unicode = parseUnicodeValue(gObj.value(QStringLiteral("unicode")));
-        item.glyphName = gObj.value(QStringLiteral("name")).toString().trimmed();
+        item.unicode = parseUnicodeValue(gObj.value(DefinitionKeys::Unicode));
+        item.glyphName = gObj.value(DefinitionKeys::Name).toString().trimmed();
 
-        if (gObj.contains(QStringLiteral("options")) && gObj.value(QStringLiteral("options")).isObject()) {
-            item.customOptions = parseOptions(gObj.value(QStringLiteral("options")).toObject(), job.defaultOptions);
+        if (gObj.contains(DefinitionKeys::Options) && gObj.value(DefinitionKeys::Options).isObject()) {
+            item.customOptions = importOptionsFromJson(gObj.value(DefinitionKeys::Options).toObject(), job.defaultOptions);
             item.hasCustomOptions = true;
         }
 
@@ -244,8 +135,8 @@ bool BatchImportDefinition::fromJson(const QByteArray& jsonData, const QString& 
 
 QByteArray BatchImportDefinition::toJson(const BatchImportJob& job, const QString& baseDir) {
     QJsonObject root;
-    root.insert(QStringLiteral("overwriteExisting"), job.overwriteExisting);
-    root.insert(QStringLiteral("defaults"), serializeOptions(job.defaultOptions));
+    root.insert(DefinitionKeys::OverwriteExisting, job.overwriteExisting);
+    root.insert(DefinitionKeys::Defaults, importOptionsToJson(job.defaultOptions));
 
     QJsonArray glyphsArr;
     for (const BatchImportItem& item : job.items) {
@@ -254,23 +145,22 @@ QByteArray BatchImportDefinition::toJson(const BatchImportJob& job, const QStrin
         if (!baseDir.isEmpty()) {
             displayPath = QDir(baseDir).relativeFilePath(item.filePath);
         }
-        gObj.insert(QStringLiteral("file"), displayPath);
+        gObj.insert(DefinitionKeys::File, displayPath);
         if (item.unicode >= 0) {
-            gObj.insert(QStringLiteral("unicode"),
+            gObj.insert(DefinitionKeys::Unicode,
                         QStringLiteral("U+%1").arg(item.unicode, 4, 16, QLatin1Char('0')).toUpper());
         }
         if (!item.glyphName.isEmpty()) {
-            gObj.insert(QStringLiteral("name"), item.glyphName);
+            gObj.insert(DefinitionKeys::Name, item.glyphName);
         }
         if (item.hasCustomOptions) {
-            gObj.insert(QStringLiteral("options"), serializeOptions(item.customOptions));
+            gObj.insert(DefinitionKeys::Options, importOptionsToJson(item.customOptions));
         }
         glyphsArr.append(gObj);
     }
-    root.insert(QStringLiteral("glyphs"), glyphsArr);
+    root.insert(DefinitionKeys::Glyphs, glyphsArr);
 
     return QJsonDocument(root).toJson(QJsonDocument::Indented);
 }
 
 } // namespace ffgui
-
