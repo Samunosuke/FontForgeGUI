@@ -1,126 +1,51 @@
-# FontForgeGUI
+# FontForgeGUI Source & Architecture (`src/`)
 
-Modern cross-platform Qt 6 Widgets GUI for FontForge, built directly on headless `libfontforge` (`ENABLE_GUI=OFF`).
-
----
-
-## Key Features
-
-- **Font Creation & Editing**:
-  - **Create New Font (`Ctrl+N`)**: Initialize a brand new font in-memory with customizable metadata, Ascent/Descent, and EM size without touching existing files.
-  - **Save In-Place (`Ctrl+S`) & Save As (`Ctrl+Shift+S`)**: Persistent document path binding, dirty indicator (`*`), and last font directory memory.
-  - **Font & Glyph Metadata Editor**: Modify Font Family, PostScript Name, Weights, Copyright, and full SFNT `name` table. Edit glyph Unicode code points, names, and alternate unicodes.
-  - **Validation Dock**: Real-time font integrity checks via FontForge's `SFValidate` with clickable issue navigation.
-
-- **Glyph Grid & Navigation**:
-  - Fast vector-rendered glyph grid with customizable cell zoom.
-  - Extended multi-selection (Shift/Ctrl + Click).
-  - Unicode Range Filtering (Basic Latin, Latin-1, PUA, and **Supplementary Private Use Areas SPUA-A `U+F0000–U+FFFFD` & SPUA-B `U+100000–U+10FFFD`**).
-  - Custom Glyph Areas with `.ffgui.json` sidecar persistence.
-
-- **Glyph Relocation ("Move Glyphs" `Ctrl+Shift+M`)**:
-  - Move multiple selected glyphs to a new starting code point (e.g. `U+F0000` or `0xF0000`).
-  - Debounced real-time collision detection against existing glyphs with overwrite/abort protection and color-coded preview.
-
-- **Advanced Vector & SVG Import**:
-  - Interactive SVG Sanitizer dialog: Strips Inkscape/Sodipodi metadata and hidden shapes.
-  - Color detection and exclusion filters.
-  - Automatic `#ffffff` cutout path extraction (creates clean interior holes).
-  - Stroke-to-path expansion and tiny path despeckling.
-  - Visual placement canvas: Pan, zoom, and drag icon offsets with live FontForge baseline, ascent, and descent metrics.
-
-- **Extended PNG & Bitmap Vector Tracing (`v0.4` – `v0.5.2`)**:
-  - Built-in in-memory contour tracer (`BitmapTracer`): Marching Squares directed edge extraction, Ramer–Douglas–Peucker simplification, and corner-preserving cubic Bézier smoothing.
-  - **Four Binarization Modes**:
-    1. **Alpha / Luminance (Standard)**: Transparent alpha masks with auto-fallback to luminance.
-    2. **Color Distance (Background Keying)**: Auto-detects background color from corner pixels; uses perceptual color distance ($\Delta C = \sqrt{2 \Delta R^2 + 4 \Delta G^2 + 3 \Delta B^2}$) to cleanly isolate multicolored icons (yellow, cyan, red, blue) from white/dark backgrounds.
-    3. **Dominant Color Palette**: Fast 8-bit color quantization into 4–8 dominant colors with clickable toggle swatches to choose which colors form the foreground vector.
-    4. **Edge Gradient (Sobel Filter)**: 3x3 multi-channel gradient filter to extract contour lines between adjacent color regions.
-  - Persistent application-wide import preferences in `QSettings` (`Edit -> Import Preferences…`).
-
-- **Batch Import & Automation (GUI & CLI)**:
-  - **Batch Import Dialog (`Ctrl+Shift+B`)**: Batch import dozens or hundreds of SVGs or PNGs from folders or files starting at any Unicode code point.
-  - **Structured JSON Job Definitions**: Import and export batch definitions including custom per-glyph options or global defaults.
-  - **Headless CLI Execution**: Run full batch imports or conversions from the terminal without opening a GUI window.
+This document describes the internal directory structure, threading model, FontForge integration, and key implementation details of FontForgeGUI. For user-facing overview, screenshots, and quick-start build instructions, see the root [README.md](../README.md).
 
 ---
 
-## Architecture
+## Directory Layout
 
-- `backend/` — Thread-safe `FontWorker` (dedicated `QThread`) wrapping `FontForgeBridge` (`libfontforge` C API + `ui_interface` hooks) and immutable DTOs (`FontTypes.hpp`): font load/export, new font creation, glyph relocation, validation (`SFValidate`), and batch imports.
-- `model/` — 
-  - `BitmapTracer`: In-memory PNG contour tracer with alpha, luminance, color-distance keying, dominant palette quantization, and Sobel edge detection.
-  - `BatchImportDefinition`: JSON serialization and deserialization for batch jobs.
-  - `FontSettingsUtils`: Centralized parameter key constants, shared JSON serializers, and persistent `QSettings`.
-  - `SvgSanitizer`: SVG vector cleaner and color separator.
-  - `UnicodeRangeFilter` & `CustomGlyphAreaConfig`: Sidecar persistence and Unicode range definitions (including SPUA-A/B).
-  - `GlyphListModel`: `QAbstractListModel` virtualized data provider.
-- `ui/` — 
-  - `MainWindow`: Unified `QGridLayout` area/filter bar, theme-aware SVG toolbar/menu icons, zoom controls, and dock panels.
-  - `IconUtils` & `resources/resources.qrc`: Embedded monochrome SVG icon loader tinted dynamically to the active Qt palette.
-  - `SettingsDialog`: Application preferences (`Edit -> Settings…` / `Ctrl+,`) for persistent toolbar button display mode (`Icons and Text`, `Icons Only`, `Text Only`).
-  - `GlyphGridView` & `GlyphGridDelegate`: Vector cards with Drag & Drop font loading.
-  - `NewFontDialog` & `CreateGlyphDialog`: Creation dialogs for fonts and glyphs.
-  - `MoveGlyphsDialog`: Debounced multi-glyph code point relocation dialog.
-  - `ImportSvgDialog`: Side-by-side interactive preview for SVG and PNG raster vectorization.
-  - `BatchImportDialog` & `ImportFilterSettingsDialog`: Batch automation and global filter preference management.
-  - `ExportFontDialog`, `FontMetadataDialog`, and `ValidationPanel`.
-- `tests/` — Automated CTest suite (6 test executables covering smoke tests, Unicode ranges, metadata validation, SVG import, bitmap tracing, and batch features).
-
----
-
-## Command Line Usage
-
-FontForgeGUI supports opening fonts directly or executing batch jobs:
-
-```bash
-# 1. Open an existing font in the GUI
-FontForgeGUI myfont.ttf
-
-# 2. Run a batch import job headless into a new font
-FontForgeGUI --batch-import icons.json --output myicons.ttf --headless
-
-# 3. Batch import images starting at U+F0000 into an existing or new font
-FontForgeGUI --input base.ttf --output output.ttf --start-codepoint U+F0000 --images ./icons/*.png --headless
-
-# 4. Open the GUI with batch parameters preloaded for confirmation
-FontForgeGUI --batch-import icons.json --gui
-```
+- `backend/` — FontForge C API wrapper, thread boundary, and immutable DTOs:
+  - `FontTypes.hpp`: Plain Qt/C++ data transfer structs (`FontSummary`, `GlyphSummary`, `SvgImportOptions`, `BatchImportJob`, `FontMergeResult`, `CreateGlyphRequest`, `MoveGlyphsRequest`, etc.) and placement helpers (`computeIconPlacement`).
+  - `FontForgeBridge.hpp/.cpp`: Encapsulates all `libfontforge` C headers (`fontforge.h`, `splinefont.h`, `splineutil.h`, `encoding.h`, `namelist.h`, etc.) strictly inside `.cpp` so no FontForge macros or globals leak into Qt UI headers. Implements `ui_interface` hooks for log/progress forwarding.
+  - `FontWorker.hpp/.cpp`: Owns a `FontForgeBridge` instance on a dedicated `QThread` and exposes queued Qt slots/signals.
+- `model/` — Pure Qt/C++ domain logic (no `QWidget` dependencies; linked into `ffgui_core` for headless CLI & CTest targets):
+  - `SvgSanitizer.hpp/.cpp`: Multi-pass DOM sanitizer (`QDomDocument`) that strips editor metadata/noise, resolves inherited CSS/presentation attributes, detects/filters colors, separates fills (`solidSvg`), strokes (`strokeSvg`), and white foreground cutouts (`cutoutSvg`), and pads tiny-path checks by `strokeWidth` for stroked icons.
+  - `BitmapTracer.hpp/.cpp`: In-memory raster-to-SVG tracer using Alpha/Luminance, perceptual Color Distance keying, Dominant Color Palette quantization, or Sobel Edge Gradient filtering, followed by Marching Squares contour/hole extraction, Ramer–Douglas–Peucker simplification, and corner-preserving cubic Bézier smoothing.
+  - `BatchImportDefinition.hpp/.cpp`: JSON job serialization/deserialization for batch imports.
+  - `FontSettingsUtils.hpp`: Centralized `QSettings` keys and helpers (`lastFontDir`, `defaultImportOptions`, `toolbarDisplayMode`).
+  - `GlyphClipboardUtils.hpp/.cpp`: Clipboard MIME handling (`application/x-fontforgegui-glyphs+json`, `image/svg+xml`, `text/plain`).
+  - `GlyphMetadataUtils.hpp/.cpp`: Shared Unicode code-point parsing, glyph name validation, and `uniXXXX` / `uXXXXX` name derivation.
+  - `UnicodeRangeFilter.hpp/.cpp` & `CustomGlyphAreaConfig.hpp/.cpp`: Range parser (`Basic Latin` through `SPUA-A`/`SPUA-B`) and `.ffgui.json` sidecar persistence.
+  - `GlyphListModel.hpp/.cpp`: `QAbstractListModel` providing virtualized glyph grid filtering, search, and incremental updates.
+- `ui/` — Qt 6 Widgets presentation layer (`FontForgeGUI` executable):
+  - `MainWindow.hpp/.cpp`: Unified `QGridLayout` filter/area bar, main toolbar with configurable `ToolbarDisplayMode`, dock panels (`ValidationPanel`, FontForge log), and `GlyphGridView` / `GlyphInspectorPanel` splitter.
+  - `IconUtils.hpp/.cpp`: Loads monochrome `currentColor` SVGs from `resources/resources.qrc` and tints them via `QSvgRenderer` (`Qt6::Svg`) to active/disabled `QPalette::ButtonText` colors.
+  - `ImportSvgDialog.hpp/.cpp`: Interactive side-by-side preview (`Original` vs. `GlyphPlacementPreviewWidget`) with drag-to-offset, wheel-to-scale, color swatches, and SVG/PNG filter controls.
+  - `BatchImportDialog.hpp/.cpp`, `ImportFilterSettingsDialog.hpp/.cpp`, `ImportFontDialog.hpp/.cpp`, `MoveGlyphsDialog.hpp/.cpp`, `CreateGlyphDialog.hpp/.cpp`, `NewFontDialog.hpp/.cpp`, `ExportFontDialog.hpp/.cpp`, `FontMetadataDialog.hpp/.cpp`, `SettingsDialog.hpp/.cpp`.
+- `resources/` — `resources.qrc` and 20 monochrome 24×24 SVG icons under `resources/icons/`.
+- `tests/` — Automated CTest executables (`test_backend_smoke`, `test_unicode_range`, `test_v02_metadata_validation`, `test_v03_svg_import`, `test_v04_features`, `test_v05_features`).
 
 ---
 
-## Build & Run (Ubuntu / Linux)
+## Key Implementation Details
 
-Install build dependencies using [`scripts/install_dependencies.sh`](../scripts/install_dependencies.sh) and build with [`scripts/build_ubuntu.sh`](../scripts/build_ubuntu.sh):
+### 1. Thread Safety & `libfontforge` Isolation
+- `libfontforge` relies on global C state and is not thread-safe. All FontForge calls execute exclusively inside `FontForgeBridge` on the dedicated `FontWorker` `QThread`.
+- The UI never holds raw `SplineFont*` or `SplineChar*` pointers; it consumes immutable `FontDocumentSnapshot` / `GlyphSummary` structs containing pre-extracted `QPainterPath` outlines (`Qt::WindingFill`, Y-up font coordinates flipped on draw).
 
-```bash
-./scripts/build_ubuntu.sh --install-deps
-./build/FontForgeGUI
-```
+### 2. Multi-Pass SVG Import (`SvgSanitizer` + `FontForgeBridge`)
+- `SvgSanitizer` splits geometry into up to three clean XML streams:
+  1. `solidSvg` (filled foreground shapes)
+  2. `strokeSvg` (stroked shapes; expanded by FontForge's `SplinePointListInterpretSVG` -> `SplineSetStroke` and normalized with `SplineSetsCorrect`)
+  3. `cutoutSvg` (`#ffffff` foreground holes subtracted after `SplineSetRemoveOverlap(..., over_remove)` via CCW winding reversal)
+- For stroke-only SVGs (`solidSvg` empty, `strokeSvg` non-empty), callers must **not** fall back from `solidSvg` to `cleanedSvg`; otherwise FontForge imports the strokes twice with opposite windings, cancelling the fill.
 
-Or run the CMake/Ninja steps manually (FontForge is referenced from the sibling repository `../FontForge` by default; override with `-DFONTFORGE_SOURCE_DIR=/path/to/FontForge`):
+### 3. Icons (`Qt6::Svg` + `IconUtils`)
+- Embedded SVGs use `stroke="currentColor"`. Because Qt's `qsvgicon` plugin does not resolve `currentColor` against `QPalette`, `IconUtils` substitutes `currentColor` with `QPalette::ButtonText` (Active and Disabled) before rasterizing via `QSvgRenderer` into multi-size `QIcon` pixmaps (16/20/24/32 px). This avoids runtime `iconengines/qsvgicon` plugin issues on Windows and works across light/dark themes.
 
-```bash
-cmake -G Ninja -S src -B build -DBUILD_TESTING=ON
-cmake --build build -j$(nproc)
-QT_QPA_PLATFORM=offscreen ctest --test-dir build --output-on-failure
-./build/FontForgeGUI
-```
-
----
-
-## Build & Run (Windows / MSYS2 UCRT64)
-
-1. Install [MSYS2](https://www.msys2.org/) (default path `C:\msys64`).
-2. Run [`scripts/build_windows.ps1`](../scripts/build_windows.ps1) in PowerShell:
-
-```powershell
-# First time: install MSYS2 UCRT64 packages, configure, build, and run CTest
-.\scripts\build_windows.ps1 -InstallDeps
-
-# Build and execute all tests
-.\scripts\build_windows.ps1
-
-# Create standalone dist-win\ bundle (FontForgeGUI.exe + Qt6/MinGW/FontForge DLLs)
-.\scripts\build_windows.ps1 -Package
-```
+### 4. Build & Testing Notes
+- FontForge is built as a headless shared subproject (`ENABLE_GUI=OFF`, `BUILD_SHARED_LIBS=ON`, `ENABLE_PYTHON_SCRIPTING=OFF`) from `FONTFORGE_SOURCE_DIR` (default `../../FontForge` relative to `src/`).
+- Tests use a custom `CHECK(expr)` macro instead of standard `assert(...)` because `RelWithDebInfo` defines `NDEBUG`.
+- Headless test runs require `QT_QPA_PLATFORM=offscreen`.

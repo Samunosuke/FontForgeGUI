@@ -145,7 +145,7 @@ struct SvgImportOptions {
     // SVG & Vector cleaning options
     bool normalizeToBlackFill = true;
     bool whiteAsCutout = true;
-    bool keepStrokes = false;
+    bool keepStrokes = true;
     bool stripTinyPaths = true;
     double minGeometryExtent = 1.0;
     QStringList excludedColors;

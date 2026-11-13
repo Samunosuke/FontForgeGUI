@@ -721,7 +721,9 @@ SvgSanitizeResult SvgSanitizer::sanitize(const QByteArray& rawSvg, const SvgFilt
 
             if (options.stripTinyPaths && tag != QStringLiteral("use")) {
                 const QSizeF ext = estimateShapeExtent(el, tag);
-                if (std::max(ext.width(), ext.height()) < options.minGeometryExtent) {
+                const double strokePad = visStroke ? state.strokeWidth : 0.0;
+                if (std::max(ext.width() + strokePad, ext.height() + strokePad) <
+                    options.minGeometryExtent) {
                     ++result.removedTinyOrEmptyCount;
                     return false;
                 }

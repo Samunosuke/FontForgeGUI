@@ -33,9 +33,13 @@ set(CMAKE_AUTORCC ON)
 
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Xml Svg)
 
-# Ensure binaries find libfontforge.so in the build tree and relative install lib dir
-set(CMAKE_BUILD_RPATH "${CMAKE_CURRENT_BINARY_DIR}/fontforge-build/lib")
-set(CMAKE_INSTALL_RPATH "$ORIGIN/../lib")
+# Ensure binaries find libfontforge.so in an adjacent ./lib bundle, next to the binary, or in the build tree
+set(CMAKE_BUILD_RPATH
+    "\$ORIGIN/lib"
+    "\$ORIGIN"
+    "${CMAKE_CURRENT_BINARY_DIR}/fontforge-build/lib"
+)
+set(CMAKE_INSTALL_RPATH "\$ORIGIN/../lib")
 
 add_library(ffgui_core STATIC
     backend/FontTypes.hpp

@@ -284,6 +284,63 @@ int main(int argc, char* argv[]) {
     }
     CHECK(foundCreatedIcon);
 
+    // Regression test: stroke-only SVG (fill="none" stroke="currentColor" + tiny stroke-width dot)
+    {
+        const QByteArray alertSvg = R"SVG(<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/>
+  <line x1="12" y1="9" x2="12" y2="13"/>
+  <line x1="12" y1="17" x2="12.01" y2="17"/>
+</svg>)SVG";
+        SvgFilterOptions fopts;
+        fopts.keepStrokes = true;
+        fopts.normalizeToBlackFill = true;
+        fopts.stripTinyPaths = true;
+        fopts.minGeometryExtent = 1.0;
+        const SvgSanitizeResult san = SvgSanitizer::sanitize(alertSvg, fopts);
+        CHECK(san.valid);
+        CHECK(san.keptGeometryCount == 3);
+        CHECK(san.removedTinyOrEmptyCount == 0);
+        CHECK(san.solidSvg.isEmpty());
+        CHECK(!san.strokeSvg.isEmpty());
+
+        SvgImportOptions iopts;
+        iopts.gid = reloadedSnap.glyphs.first().gid;
+        iopts.svgData = san.solidSvg;
+        iopts.strokeSvgData = san.strokeSvg;
+        iopts.replaceExistingContours = true;
+        iopts.scaleToEm = true;
+        iopts.correctDirection = true;
+        iopts.removeOverlap = true;
+        iopts.roundToInt = true;
+        SvgImportResult ires;
+        QString ierr;
+        CHECK(bridge.importSvgToGlyph(iopts, &ires, &ierr));
+        CHECK(ires.glyph.hasOutline);
+        CHECK(ires.glyph.contourCount == 4); // outer + inner triangle + '!' stem + '!' dot
+        CHECK(ires.glyph.bounds.width() > 100.0 && ires.glyph.bounds.height() > 100.0);
+
+        // Also verify default SvgImportOptions (keepStrokes == true) works in batchImport
+        const QString alertPath = tempDir.filePath(QStringLiteral("alert-triangle.svg"));
+        QFile f(alertPath);
+        CHECK(f.open(QIODevice::WriteOnly));
+        f.write(alertSvg);
+        f.close();
+
+        BatchImportJob job;
+        BatchImportItem item;
+        item.filePath = alertPath;
+        item.unicode = 0xE050;
+        item.glyphName = QStringLiteral("alert_triangle");
+        job.items.append(item);
+        BatchImportResult bres;
+        QString berr;
+        CHECK(bridge.batchImport(job, &bres, &berr));
+        CHECK(bres.importedCount == 1);
+        CHECK(bres.skippedCount == 0);
+        CHECK(bres.updatedGlyphs.size() == 1);
+        CHECK(bres.updatedGlyphs.first().contourCount == 4);
+    }
+
     bridge.closeFont();
 
     std::printf("v0.3 SVG filter + import test passed (%d -> %d contours)\n",

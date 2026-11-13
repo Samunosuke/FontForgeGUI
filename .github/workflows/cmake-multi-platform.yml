@@ -1,0 +1,107 @@
+name: CMake Multi-Platform Build & Test
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  linux:
+    name: Ubuntu (Ninja + Qt6 + libfontforge)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout FontForgeGUI
+        uses: actions/checkout@v6
+        with:
+          path: FontForgeGUI
+
+      - name: Checkout upstream FontForge
+        uses: actions/checkout@v6
+        with:
+          repository: fontforge/fontforge
+          path: FontForge
+
+      - name: Install Ubuntu build dependencies
+        run: ./FontForgeGUI/scripts/install_dependencies.sh
+
+      - name: Configure, build, and run CTest
+        run: ./FontForgeGUI/scripts/build_ubuntu.sh --build-type RelWithDebInfo
+
+      - name: Offscreen GUI smoke test
+        run: |
+          QT_QPA_PLATFORM=offscreen timeout -s INT 3s \
+            ./FontForgeGUI/build/FontForgeGUI ./FontForge/tests/fonts/Ambrosia.sfd \
+            || test $? -eq 124 -o $? -eq 130
+
+      - name: Stage Linux bundle
+        run: |
+          mkdir -p dist-linux/lib
+          cp FontForgeGUI/build/FontForgeGUI dist-linux/
+          cp -P FontForgeGUI/build/fontforge-build/lib/libfontforge.so* dist-linux/lib/
+
+      - name: Upload Linux artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: FontForgeGUI-linux-x64
+          path: dist-linux/
+
+  windows:
+    name: Windows (MSYS2 UCRT64 + Ninja + Qt6)
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout FontForgeGUI
+        uses: actions/checkout@v6
+        with:
+          path: FontForgeGUI
+
+      - name: Checkout upstream FontForge
+        uses: actions/checkout@v6
+        with:
+          repository: fontforge/fontforge
+          path: FontForge
+
+      - name: Setup MSYS2 (UCRT64)
+        id: msys2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            mingw-w64-ucrt-x86_64-toolchain
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-ninja
+            mingw-w64-ucrt-x86_64-pkgconf
+            mingw-w64-ucrt-x86_64-qt6-base
+            mingw-w64-ucrt-x86_64-qt6-svg
+            mingw-w64-ucrt-x86_64-freetype
+            mingw-w64-ucrt-x86_64-libxml2
+            mingw-w64-ucrt-x86_64-zlib
+            mingw-w64-ucrt-x86_64-libiconv
+            mingw-w64-ucrt-x86_64-libspiro
+            mingw-w64-ucrt-x86_64-woff2
+            mingw-w64-ucrt-x86_64-harfbuzz
+            mingw-w64-ucrt-x86_64-libpng
+            mingw-w64-ucrt-x86_64-libjpeg-turbo
+            mingw-w64-ucrt-x86_64-libtiff
+            mingw-w64-ucrt-x86_64-giflib
+            mingw-w64-ucrt-x86_64-libunibreak
+
+      - name: Configure, build, test, and package Windows bundle
+        shell: pwsh
+        run: |
+          .\FontForgeGUI\scripts\build_windows.ps1 `
+            -Msys2Root "${{ steps.msys2.outputs.msys2-location }}" `
+            -BuildType RelWithDebInfo `
+            -Package
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: FontForgeGUI-windows-ucrt64
+          path: FontForgeGUI/dist-win/
+

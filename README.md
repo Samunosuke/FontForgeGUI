@@ -2,82 +2,110 @@
 
 Modern cross-platform Qt 6 Widgets GUI for FontForge, built directly on headless `libfontforge` (`ENABLE_GUI=OFF`).
 
+![FontForgeGUI Main Window & Glyph Preview](screenshots/gyph_preview.png)
+
+---
+
+## Screenshots
+
+| Main Window & Multi-Selection | Batch Import |
+| :---: | :---: |
+| ![Multi-Selection Context Menu](screenshots/multi_select_options.png) | ![Batch Import Dialog](screenshots/svg_batch_import.png) |
+
+| SVG Import & Placement Preview | SVG Sanitizer & Color Filter |
+| :---: | :---: |
+| ![SVG Import Dialog](screenshots/svg_import.png) | ![SVG Color & Cutout Filter](screenshots/svg_import_2.png) |
+
+| PNG Bitmap Tracing | Save As & Export Formats |
+| :---: | :---: |
+| ![PNG Import & Vectorization](screenshots/png_import.png) | ![Save Font As](screenshots/save_font_as.png) |
+
+<details>
+<summary>Supported Export & Save Formats</summary>
+
+![Save Font As Formats](screenshots/save_font_as_formats.png)
+
+</details>
+
 ---
 
 ## Key Features
 
 - **Font Creation & Editing**:
-  - **Create New Font (`Ctrl+N`)**: Initialize a brand new font in-memory with customizable metadata, Ascent/Descent, and EM size without touching existing files.
-  - **Save In-Place (`Ctrl+S`) & Save As (`Ctrl+Shift+S`)**: Persistent document path binding, dirty indicator (`*`), and last font directory memory.
-  - **Font & Glyph Metadata Editor**: Modify Font Family, PostScript Name, Weights, Copyright, and full SFNT `name` table. Edit glyph Unicode code points, names, and alternate unicodes.
+  - **Create New Font (`Ctrl+N`)** & **Create New Glyph (`Ctrl+Shift+N`)**: Initialize fonts or add new glyphs (`Name`, `Unicode`, `Alt Unicodes`, `Advance Width`) with optional immediate SVG/PNG import.
+  - **Save In-Place (`Ctrl+S`)**, **Save As (`Ctrl+Shift+S`)**, & **Export (`Ctrl+E`)**: Persistent document path binding, dirty indicator (`*`), and last-directory memory across `.sfd`, `.ttf`, `.otf`, `.woff`, `.woff2`, `.ufo`, `.pfb`, `.svg`.
+  - **Font & Glyph Metadata Editor**: Modify Font Family, PostScript Name, Weights, Copyright, and full SFNT `name` table. Edit glyph Unicode code points, names, and alternate unicodes inline.
   - **Validation Dock**: Real-time font integrity checks via FontForge's `SFValidate` with clickable issue navigation.
 
-- **Glyph Grid & Navigation**:
-  - Fast vector-rendered glyph grid with customizable cell zoom.
-  - Extended multi-selection (Shift/Ctrl + Click).
-  - Unicode Range Filtering (Basic Latin, Latin-1, PUA, and **Supplementary Private Use Areas SPUA-A `U+F0000–U+FFFFD` & SPUA-B `U+100000–U+10FFFD`**).
-  - Custom Glyph Areas with `.ffgui.json` sidecar persistence.
+- **Glyph Grid, UI & Preferences**:
+  - Fast vector-rendered glyph grid with Drag & Drop font loading, customizable cell zoom, and Shift/Ctrl multi-selection.
+  - Unified `QGridLayout` filter & area bar with Unicode Range Filtering (Basic Latin, Latin-1, PUA, **SPUA-A `U+F0000–U+FFFFD`**, **SPUA-B `U+100000–U+10FFFD`**) and `.ffgui.json` sidecar persistence.
+  - Theme-aware monochrome SVG icons (`Qt6::Svg`) and **Settings (`Ctrl+,`)** to configure toolbar display mode (*Icons and Text Beside/Under*, *Icons Only*, *Text Only*).
 
 - **Glyph Relocation ("Move Glyphs" `Ctrl+Shift+M`)**:
-  - Move multiple selected glyphs to a new starting code point (e.g. `U+F0000` or `0xF0000`).
-  - Debounced real-time collision detection against existing glyphs with overwrite/abort protection and color-coded preview.
+  - Move multiple selected glyphs to a new starting code point (e.g. `U+F0000` or `0xF0000`) with debounced collision detection and overwrite/abort protection.
 
 - **Advanced Vector & SVG Import**:
-  - Interactive SVG Sanitizer dialog: Strips Inkscape/Sodipodi metadata and hidden shapes.
-  - Color detection and exclusion filters.
-  - Automatic `#ffffff` cutout path extraction (creates clean interior holes).
-  - Stroke-to-path expansion and tiny path despeckling.
-  - Visual placement canvas: Pan, zoom, and drag icon offsets with live FontForge baseline, ascent, and descent metrics.
+  - Interactive SVG Sanitizer: strips Inkscape/Sodipodi metadata and hidden shapes, excludes colors, supports stroke-only icons (`fill="none" stroke="currentColor"`), expands strokes, extracts `#ffffff` cutout holes, and cleans tiny noise.
+  - Visual placement canvas: pan, zoom, and drag icon offsets with live FontForge baseline, ascent, and descent metrics.
 
-- **Extended PNG & Bitmap Vector Tracing (`v0.4` – `v0.5.2`)**:
+- **Extended PNG & Bitmap Vector Tracing**:
   - Built-in in-memory contour tracer (`BitmapTracer`): Marching Squares directed edge extraction, Ramer–Douglas–Peucker simplification, and corner-preserving cubic Bézier smoothing.
-  - **Four Binarization Modes**:
-    1. **Alpha / Luminance (Standard)**: Transparent alpha masks with auto-fallback to luminance.
-    2. **Color Distance (Background Keying)**: Auto-detects background color from corner pixels; uses perceptual color distance ($\Delta C = \sqrt{2 \Delta R^2 + 4 \Delta G^2 + 3 \Delta B^2}$) to cleanly isolate multicolored icons (yellow, cyan, red, blue) from white/dark backgrounds.
-    3. **Dominant Color Palette**: Fast 8-bit color quantization into 4–8 dominant colors with clickable toggle swatches to choose which colors form the foreground vector.
-    4. **Edge Gradient (Sobel Filter)**: 3x3 multi-channel gradient filter to extract contour lines between adjacent color regions.
-  - Persistent application-wide import preferences in `QSettings` (`Edit -> Import Preferences…`).
+  - **Four Binarization Modes**: Alpha / Luminance, Color Distance (Background Keying), Dominant Color Palette, and Edge Gradient (Sobel Filter), with persistent import defaults in `QSettings` (`Edit -> Import Preferences…`).
 
-- **Font Merging & Inter-Process Clipboard (`v0.5.3`)**:
-  - **Copy & Paste (`Ctrl+C` / `Ctrl+V`)**: Seamlessly copy selected glyphs between FontForgeGUI windows or paste directly from external vector design tools (Inkscape, Figma, Illustrator) via standard `image/svg+xml` and structured `application/x-fontforgegui-glyphs+json`.
-  - **Import Glyphs from Font Dialog (`File -> Import Glyphs from Font...`)**: Merge glyphs from any external font file (`.ttf`, `.otf`, `.sfd`, `.woff`, `.woff2`, `.ufo`) into the active font. Features real-time debounced collision analysis, range filtering (e.g. `U+E000-U+E0FF` or `all`), target starting code point mapping, advance width copying, and automatic EM-scaling.
-  - **CLI Font Merging**: Headlessly merge glyphs across font files via `--merge-font`, `--source-range`, `--target-start`, and `--overwrite`.
+- **Font Merging & Inter-Process Clipboard**:
+  - **Copy & Paste (`Ctrl+C` / `Ctrl+V`)** between FontForgeGUI windows and external vector apps (`image/svg+xml`, `application/x-fontforgegui-glyphs+json`).
+  - **Import Glyphs from Font (`File -> Import Glyphs from Font…`)**: Merge glyphs with debounced collision analysis, range filtering, advance width copying, and automatic EM scaling.
 
 - **Batch Import & Automation (GUI & CLI)**:
-  - **Batch Import Dialog (`Ctrl+Shift+B`)**: Batch import dozens or hundreds of SVGs or PNGs from folders or files starting at any Unicode code point.
-  - **Structured JSON Job Definitions**: Import and export batch definitions including custom per-glyph options or global defaults.
-  - **Headless CLI Execution**: Run full batch imports, font merging, or conversions from the terminal without opening a GUI window. See [CLI.md](CLI.md) for full documentation.
+  - **Batch Import Dialog (`Ctrl+Shift+B`)** with JSON job definitions and headless CLI execution (`--headless`, `--batch-import`, `--merge-font`). See [CLI.md](CLI.md) for full documentation.
 
 ---
 
-## Architecture
+## Build & Run (Ubuntu / Linux)
 
-- `backend/` — Thread-safe `FontWorker` (dedicated `QThread`) wrapping `FontForgeBridge` (`libfontforge` C API + `ui_interface` hooks) and immutable DTOs (`FontTypes.hpp`): font load/export, new font creation, glyph relocation, font merging, validation (`SFValidate`), and batch imports.
-- `model/` — 
-  - `BitmapTracer`: In-memory PNG contour tracer with alpha, luminance, color-distance keying, dominant palette quantization, and Sobel edge detection.
-  - `BatchImportDefinition`: JSON serialization and deserialization for batch jobs.
-  - `FontSettingsUtils`: Centralized parameter key constants, shared JSON serializers, and persistent `QSettings`.
-  - `GlyphClipboardUtils`: MIME serialization/deserialization for inter-process glyph clipboard (`JSON`, `SVG`, `plain text`).
-  - `GlyphMetadataUtils`: Range parsing and Unicode code point validation.
-  - `SvgSanitizer`: SVG vector cleaner and color separator.
-  - `UnicodeRangeFilter` & `CustomGlyphAreaConfig`: Sidecar persistence and Unicode range definitions (including SPUA-A/B).
-  - `GlyphListModel`: `QAbstractListModel` virtualized data provider.
-- `ui/` — 
-  - `MainWindow`: Main ribbon, menus, zoom controls, and dock panels.
-  - `GlyphGridView` & `GlyphGridDelegate`: Vector cards with Drag & Drop font loading.
-  - `NewFontDialog` & `CreateGlyphDialog`: Creation dialogs for fonts and glyphs.
-  - `MoveGlyphsDialog`: Debounced multi-glyph code point relocation dialog.
-  - `ImportFontDialog`: Debounced font merging dialog with collision preview and EM scaling.
-  - `ImportSvgDialog`: Side-by-side interactive preview for SVG and PNG raster vectorization.
-  - `BatchImportDialog` & `ImportFilterSettingsDialog`: Batch automation and global filter preference management.
-  - `ExportFontDialog`, `FontMetadataDialog`, and `ValidationPanel`.
-- `tests/` — Automated CTest suite (6 test executables covering smoke tests, Unicode ranges, metadata validation, SVG import, bitmap tracing, batch features, and font merging/clipboard).
+1. Fetch upstream FontForge into `../FontForge`:
+
+```bash
+./scripts/fetch_fontforge.sh
+```
+
+2. Install dependencies and build + run tests with [`scripts/build_ubuntu.sh`](scripts/build_ubuntu.sh):
+
+```bash
+./scripts/build_ubuntu.sh --install-deps
+./build/FontForgeGUI
+```
+
+You can also pass a font file on the command line (or drop one onto the empty glyph grid):
+
+```bash
+./build/FontForgeGUI ../FontForge/tests/fonts/Ambrosia.sfd
+```
+
+---
+
+## Build & Run (Windows / MSYS2 UCRT64)
+
+1. Install [MSYS2](https://www.msys2.org/) (default path `C:\msys64`).
+2. Fetch FontForge into `..\FontForge` and build with [`scripts/build_windows.ps1`](scripts/build_windows.ps1) in PowerShell:
+
+```powershell
+# Fetch FontForge into ..\FontForge
+.\scripts\fetch_fontforge.ps1
+
+# First time: install MSYS2 UCRT64 packages, configure, build, and run CTest
+.\scripts\build_windows.ps1 -InstallDeps
+
+# Create standalone dist-win\ bundle (FontForgeGUI.exe + Qt6/MinGW/FontForge DLLs)
+.\scripts\build_windows.ps1 -Package
+```
 
 ---
 
 ## Command Line Usage
 
-FontForgeGUI provides a comprehensive command-line interface for headless scripting and GUI pre-configuration. Complete documentation is available in [CLI.md](CLI.md).
+Complete CLI documentation is available in [CLI.md](CLI.md).
 
 ```bash
 # 1. Open an existing font in the GUI
@@ -92,45 +120,16 @@ FontForgeGUI -i Roboto-Regular.ttf \
 
 # 3. Batch import images starting at U+F0000 into a new font headlessly
 FontForgeGUI -o myicons.woff2 --import-images ./icons --start-unicode U+F0000 --headless
-
-# 4. Batch import via JSON definition
-FontForgeGUI -i base.ttf --import-def icons.json -o output.ttf --overwrite
 ```
 
 ---
 
-## Build & Run (Ubuntu / Linux)
+## Architecture & Documentation
 
-Install build dependencies using [`scripts/install_dependencies.sh`](scripts/install_dependencies.sh):
+- [src/README.md](src/README.md) — Source directory layout, threading model, FontForge C API isolation, and implementation details.
+- [src/CONCEPT.md](src/CONCEPT.md) — Design decisions, milestone history, and roadmap.
+- [CLI.md](CLI.md) — Command-line flags and JSON batch definition reference.
 
-```bash
-./scripts/install_dependencies.sh
-```
+## License
 
-FontForge is referenced from the sibling repository `../FontForge` by default (override with `-DFONTFORGE_SOURCE_DIR=/path/to/FontForge`).
-
-```bash
-cmake -G Ninja -S src -B build -DBUILD_TESTING=ON
-cmake --build build -j$(nproc)
-QT_QPA_PLATFORM=offscreen ctest --test-dir build --output-on-failure
-./build/FontForgeGUI
-```
-
----
-
-## Build & Run (Windows / MSYS2 UCRT64)
-
-1. Install [MSYS2](https://www.msys2.org/) (default path `C:\msys64`).
-2. Run [`scripts/build_windows.ps1`](scripts/build_windows.ps1) in PowerShell:
-
-```powershell
-# First time: install MSYS2 UCRT64 packages, configure, build, and run CTest
-.\scripts\build_windows.ps1 -InstallDeps
-
-# Build and execute all tests
-.\scripts\build_windows.ps1
-
-# Create standalone dist-win\ bundle (FontForgeGUI.exe + Qt6/MinGW/FontForge DLLs)
-.\scripts\build_windows.ps1 -Package
-```
-
+Licensed under the **GNU General Public License v3.0 or later** (`GPL-3.0-or-later`), required by linking `libfontforge`. See [LICENSE.md](LICENSE.md) for the full license text.

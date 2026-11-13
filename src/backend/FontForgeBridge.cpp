@@ -1515,12 +1515,17 @@ bool FontForgeBridge::batchImport(const BatchImportJob& job, BatchImportResult* 
             filterOpts.includedColors = importOpts.includedColors;
             SvgSanitizeResult sanRes = SvgSanitizer::sanitizeFile(item.filePath, filterOpts);
             if (!sanRes.valid || sanRes.keptGeometryCount == 0) {
+                const QString reason = !sanRes.errorMessage.isEmpty()
+                    ? sanRes.errorMessage
+                    : QStringLiteral("No visible geometry remained after SVG filtering.");
                 res.errors.append(QStringLiteral("Failed to parse SVG '%1': %2")
-                                      .arg(item.filePath, sanRes.errorMessage));
+                                      .arg(item.filePath, reason));
                 ++res.skippedCount;
                 continue;
             }
-            importOpts.svgData = !sanRes.solidSvg.isEmpty() ? sanRes.solidSvg : sanRes.cleanedSvg;
+            importOpts.svgData = (!sanRes.solidSvg.isEmpty() || !sanRes.strokeSvg.isEmpty())
+                                     ? sanRes.solidSvg
+                                     : sanRes.cleanedSvg;
             importOpts.strokeSvgData = sanRes.strokeSvg;
             importOpts.cutoutSvgData = sanRes.cutoutSvg;
             importOpts.svgWidth = sanRes.width > 0.0 ? sanRes.width : sanRes.viewBox.width();

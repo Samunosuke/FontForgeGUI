@@ -1403,7 +1403,9 @@ void ImportSvgDialog::updatePlacementPreview() {
 SvgImportOptions ImportSvgDialog::importOptions() const {
     SvgImportOptions opts;
     opts.gid = m_targetGlyph.gid;
-    opts.svgData = !m_lastResult.solidSvg.isEmpty() ? m_lastResult.solidSvg : m_lastResult.cleanedSvg;
+    opts.svgData = (!m_lastResult.solidSvg.isEmpty() || !m_lastResult.strokeSvg.isEmpty())
+                       ? m_lastResult.solidSvg
+                       : m_lastResult.cleanedSvg;
     opts.strokeSvgData = m_lastResult.strokeSvg;
     opts.cutoutSvgData = m_lastResult.cutoutSvg;
     opts.replaceExistingContours = m_replaceRadio->isChecked();
