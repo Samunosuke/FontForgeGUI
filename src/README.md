@@ -89,13 +89,14 @@ FontForgeGUI --batch-import icons.json --gui
 
 ## Build & Run (Ubuntu / Linux)
 
-Install build dependencies using [`scripts/install_dependencies.sh`](../scripts/install_dependencies.sh):
+Install build dependencies using [`scripts/install_dependencies.sh`](../scripts/install_dependencies.sh) and build with [`scripts/build_ubuntu.sh`](../scripts/build_ubuntu.sh):
 
 ```bash
-./scripts/install_dependencies.sh
+./scripts/build_ubuntu.sh --install-deps
+./build/FontForgeGUI
 ```
 
-FontForge is referenced from the sibling repository `../FontForge` by default (override with `-DFONTFORGE_SOURCE_DIR=/path/to/FontForge`).
+Or run the CMake/Ninja steps manually (FontForge is referenced from the sibling repository `../FontForge` by default; override with `-DFONTFORGE_SOURCE_DIR=/path/to/FontForge`):
 
 ```bash
 cmake -G Ninja -S src -B build -DBUILD_TESTING=ON
