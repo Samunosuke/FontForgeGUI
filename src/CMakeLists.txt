@@ -108,6 +108,11 @@ add_executable(FontForgeGUI WIN32
     ui/ImportFilterSettingsDialog.cpp
     ui/ImportFontDialog.hpp
     ui/ImportFontDialog.cpp
+    ui/IconUtils.hpp
+    ui/IconUtils.cpp
+    ui/SettingsDialog.hpp
+    ui/SettingsDialog.cpp
+    resources/resources.qrc
 )
 
 target_link_libraries(FontForgeGUI

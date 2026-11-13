@@ -344,6 +344,21 @@ int main(int argc, char* argv[]) {
     delete clipMime;
 
     bridge.closeFont();
+
+    // -------------------------------------------------------------------------
+    // 8. Toolbar Display Mode Persistence via QSettings (v0.5.4)
+    // -------------------------------------------------------------------------
+    const ToolbarDisplayMode prevToolbarMode = loadToolbarDisplayMode();
+    saveToolbarDisplayMode(ToolbarDisplayMode::IconOnly);
+    CHECK(loadToolbarDisplayMode() == ToolbarDisplayMode::IconOnly);
+    CHECK(toQtToolButtonStyle(ToolbarDisplayMode::IconOnly) == Qt::ToolButtonIconOnly);
+    CHECK(toQtToolButtonStyle(ToolbarDisplayMode::TextOnly) == Qt::ToolButtonTextOnly);
+    CHECK(toQtToolButtonStyle(ToolbarDisplayMode::IconAndTextBeside) ==
+          Qt::ToolButtonTextBesideIcon);
+    CHECK(toQtToolButtonStyle(ToolbarDisplayMode::IconAndTextUnder) ==
+          Qt::ToolButtonTextUnderIcon);
+    saveToolbarDisplayMode(prevToolbarMode);
+
     return 0;
 }
 

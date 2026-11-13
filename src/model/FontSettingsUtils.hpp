@@ -17,7 +17,15 @@ namespace SettingsKeys {
     inline constexpr QLatin1StringView Application{"FontForgeGUI"};
     inline constexpr QLatin1StringView LastFontDir{"lastFontDir"};
     inline constexpr QLatin1StringView DefaultImportOptions{"defaultImportOptions"};
+    inline constexpr QLatin1StringView ToolbarDisplayMode{"toolbarDisplayMode"};
 } // namespace SettingsKeys
+
+enum class ToolbarDisplayMode {
+    IconAndTextBeside = 0,
+    IconAndTextUnder = 1,
+    IconOnly = 2,
+    TextOnly = 3,
+};
 
 namespace ImportOptionKeys {
     inline constexpr QLatin1StringView PlacementMode{"placementMode"};
@@ -266,6 +274,37 @@ inline void saveDefaultImportOptions(const SvgImportOptions& opts) {
 inline void resetDefaultImportOptions() {
     QSettings settings(SettingsKeys::Organization, SettingsKeys::Application);
     settings.remove(SettingsKeys::DefaultImportOptions);
+}
+
+inline Qt::ToolButtonStyle toQtToolButtonStyle(ToolbarDisplayMode mode) {
+    switch (mode) {
+    case ToolbarDisplayMode::IconAndTextBeside:
+        return Qt::ToolButtonTextBesideIcon;
+    case ToolbarDisplayMode::IconAndTextUnder:
+        return Qt::ToolButtonTextUnderIcon;
+    case ToolbarDisplayMode::IconOnly:
+        return Qt::ToolButtonIconOnly;
+    case ToolbarDisplayMode::TextOnly:
+        return Qt::ToolButtonTextOnly;
+    }
+    return Qt::ToolButtonTextBesideIcon;
+}
+
+inline ToolbarDisplayMode loadToolbarDisplayMode() {
+    QSettings settings(SettingsKeys::Organization, SettingsKeys::Application);
+    const int raw =
+        settings.value(SettingsKeys::ToolbarDisplayMode,
+                       static_cast<int>(ToolbarDisplayMode::IconAndTextBeside))
+            .toInt();
+    if (raw < 0 || raw > static_cast<int>(ToolbarDisplayMode::TextOnly)) {
+        return ToolbarDisplayMode::IconAndTextBeside;
+    }
+    return static_cast<ToolbarDisplayMode>(raw);
+}
+
+inline void saveToolbarDisplayMode(ToolbarDisplayMode mode) {
+    QSettings settings(SettingsKeys::Organization, SettingsKeys::Application);
+    settings.setValue(SettingsKeys::ToolbarDisplayMode, static_cast<int>(mode));
 }
 
 } // namespace ffgui

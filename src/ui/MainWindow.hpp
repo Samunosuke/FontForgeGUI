@@ -2,6 +2,7 @@
 
 #include "backend/FontTypes.hpp"
 #include "model/CustomGlyphAreaConfig.hpp"
+#include "model/FontSettingsUtils.hpp"
 
 #include <QMainWindow>
 #include <QThread>
@@ -17,6 +18,7 @@ class QPlainTextEdit;
 class QProgressBar;
 class QPushButton;
 class QSlider;
+class QToolBar;
 
 namespace ffgui {
 
@@ -55,6 +57,7 @@ private slots:
     void onImportFontClicked();
     void onCopyGlyphsClicked();
     void onPasteGlyphsClicked();
+    void onSettingsClicked();
 
     void onFontLoaded(const ffgui::FontDocumentSnapshot& snapshot);
     void onFontLoadFailed(const QString& error);
@@ -97,6 +100,7 @@ private slots:
 private:
     void setupUi();
     void setupMenusAndToolbar();
+    void applyToolbarDisplayMode(ToolbarDisplayMode mode);
     void setBusy(bool busy, const QString& message = QString());
     void applyCurrentAreaFilter();
     void syncAreaWidgetsFromConfig();
@@ -132,6 +136,9 @@ private:
     QAction* m_importFontAction = nullptr;
     QAction* m_copyGlyphsAction = nullptr;
     QAction* m_pasteGlyphsAction = nullptr;
+    QAction* m_settingsAction = nullptr;
+
+    QToolBar* m_mainToolBar = nullptr;
 
     QComboBox* m_areaCombo = nullptr;
     QLineEdit* m_rangeEdit = nullptr;

@@ -14,9 +14,11 @@
 #include "ui/GlyphGridDelegate.hpp"
 #include "ui/GlyphGridView.hpp"
 #include "ui/GlyphInspectorPanel.hpp"
+#include "ui/IconUtils.hpp"
 #include "ui/ImportSvgDialog.hpp"
 #include "ui/MoveGlyphsDialog.hpp"
 #include "ui/NewFontDialog.hpp"
+#include "ui/SettingsDialog.hpp"
 #include "ui/ValidationPanel.hpp"
 
 #include <QAction>
@@ -26,18 +28,19 @@
 #include <QDockWidget>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QGridLayout>
 #include <QHBoxLayout>
 #include <QInputDialog>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListView>
 #include <QMenu>
-#include <QMenu>
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QPlainTextEdit>
 #include <QProgressBar>
 #include <QPushButton>
+#include <QSizePolicy>
 #include <QSlider>
 #include <QSplitter>
 #include <QStatusBar>
@@ -131,32 +134,60 @@ void MainWindow::setupUi() {
     rootLayout->setContentsMargins(8, 6, 8, 6);
     rootLayout->setSpacing(6);
 
-    // Custom Glyph Area bar
-    auto* areaBar = new QHBoxLayout();
-    areaBar->setSpacing(6);
+    // Custom Glyph Area & Search/Zoom grid (aligned columns across both rows)
+    auto* controlsGrid = new QGridLayout();
+    controlsGrid->setContentsMargins(0, 0, 0, 0);
+    controlsGrid->setHorizontalSpacing(8);
+    controlsGrid->setVerticalSpacing(6);
 
-    areaBar->addWidget(new QLabel(tr("Custom Glyph Area:"), central));
+    auto* areaLabel = new QLabel(tr("Custom Area:"), central);
+    areaLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+    controlsGrid->addWidget(areaLabel, 0, 0);
+
+    auto* areaSelectRow = new QHBoxLayout();
+    areaSelectRow->setContentsMargins(0, 0, 0, 0);
+    areaSelectRow->setSpacing(4);
 
     m_areaCombo = new QComboBox(central);
-    m_areaCombo->setMinimumWidth(150);
-    areaBar->addWidget(m_areaCombo);
+    m_areaCombo->setMinimumWidth(145);
+    areaSelectRow->addWidget(m_areaCombo, 1);
 
-    m_addAreaBtn = new QPushButton(QStringLiteral("+"), central);
+    m_addAreaBtn = new QPushButton(central);
+    m_addAreaBtn->setIcon(loadTintedSvgIcon(QStringLiteral(":/icons/plus.svg")));
+    m_addAreaBtn->setIconSize(QSize(14, 14));
     m_addAreaBtn->setToolTip(tr("Create a new Custom Glyph Area"));
-    m_addAreaBtn->setFixedWidth(28);
-    areaBar->addWidget(m_addAreaBtn);
+    m_addAreaBtn->setFixedSize(26, 26);
+    areaSelectRow->addWidget(m_addAreaBtn);
 
-    m_removeAreaBtn = new QPushButton(QStringLiteral("−"), central);
+    m_removeAreaBtn = new QPushButton(central);
+    m_removeAreaBtn->setIcon(loadTintedSvgIcon(QStringLiteral(":/icons/minus.svg")));
+    m_removeAreaBtn->setIconSize(QSize(14, 14));
     m_removeAreaBtn->setToolTip(tr("Remove current Custom Glyph Area"));
-    m_removeAreaBtn->setFixedWidth(28);
-    areaBar->addWidget(m_removeAreaBtn);
+    m_removeAreaBtn->setFixedSize(26, 26);
+    areaSelectRow->addWidget(m_removeAreaBtn);
 
-    areaBar->addWidget(new QLabel(tr("Unicode Ranges:"), central));
+    controlsGrid->addLayout(areaSelectRow, 0, 1);
+
+    auto* rangesLabel = new QLabel(tr("Ranges:"), central);
+    rangesLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+    controlsGrid->addWidget(rangesLabel, 0, 2);
+
+    auto* rangeInputRow = new QHBoxLayout();
+    rangeInputRow->setContentsMargins(0, 0, 0, 0);
+    rangeInputRow->setSpacing(4);
 
     m_rangeEdit = new QLineEdit(central);
     m_rangeEdit->setPlaceholderText(tr("e.g. U+0020-007E, U+E000-E0FF or * for all"));
     m_rangeEdit->setClearButtonEnabled(true);
-    areaBar->addWidget(m_rangeEdit, 2);
+    rangeInputRow->addWidget(m_rangeEdit, 1);
+
+    m_rangeStatusLabel = new QLabel(central);
+    m_rangeStatusLabel->setFixedSize(18, 18);
+    m_rangeStatusLabel->setAlignment(Qt::AlignCenter);
+    m_rangeStatusLabel->setVisible(false);
+    rangeInputRow->addWidget(m_rangeStatusLabel);
+
+    controlsGrid->addLayout(rangeInputRow, 0, 3);
 
     m_presetBtn = new QPushButton(tr("Presets ▾"), central);
     auto* presetMenu = new QMenu(m_presetBtn);
@@ -168,43 +199,62 @@ void MainWindow::setupUi() {
         });
     }
     m_presetBtn->setMenu(presetMenu);
-    areaBar->addWidget(m_presetBtn);
+    controlsGrid->addWidget(m_presetBtn, 0, 4);
 
     m_unencodedCheck = new QCheckBox(tr("Include unencoded"), central);
-    areaBar->addWidget(m_unencodedCheck);
+    controlsGrid->addWidget(m_unencodedCheck, 0, 5);
 
     m_saveAreasBtn = new QPushButton(tr("Save Areas"), central);
+    m_saveAreasBtn->setIcon(loadTintedSvgIcon(QStringLiteral(":/icons/save.svg")));
+    m_saveAreasBtn->setIconSize(QSize(15, 15));
     m_saveAreasBtn->setToolTip(tr("Save Custom Glyph Areas to sidecar file (.ffgui.json)"));
-    areaBar->addWidget(m_saveAreasBtn);
+    controlsGrid->addWidget(m_saveAreasBtn, 0, 6);
 
-    m_rangeStatusLabel = new QLabel(central);
-    areaBar->addWidget(m_rangeStatusLabel);
+    // Row 1: Find Glyph (aligned with Custom Area & Ranges) + Cell Size + Count
+    auto* findLabelRow = new QHBoxLayout();
+    findLabelRow->setContentsMargins(0, 0, 0, 0);
+    findLabelRow->setSpacing(4);
+    findLabelRow->addStretch(1);
+    auto* findIconLabel = new QLabel(central);
+    findIconLabel->setPixmap(loadTintedSvgPixmap(QStringLiteral(":/icons/search.svg"), 15));
+    findIconLabel->setToolTip(tr("Filter glyphs by name, Unicode, or GID"));
+    findLabelRow->addWidget(findIconLabel);
+    auto* findTextLabel = new QLabel(tr("Find:"), central);
+    findTextLabel->setToolTip(tr("Filter glyphs by name, Unicode, or GID"));
+    findLabelRow->addWidget(findTextLabel);
+    controlsGrid->addLayout(findLabelRow, 1, 0);
 
-    rootLayout->addLayout(areaBar);
-
-    // Search & Zoom bar
-    auto* filterBar = new QHBoxLayout();
-    filterBar->setSpacing(8);
-
-    filterBar->addWidget(new QLabel(tr("Find Glyph:"), central));
     m_searchEdit = new QLineEdit(central);
     m_searchEdit->setPlaceholderText(tr("Filter by glyph name, Unicode (U+0041 / 0041), or GID (#42)…"));
     m_searchEdit->setClearButtonEnabled(true);
-    filterBar->addWidget(m_searchEdit, 1);
+    controlsGrid->addWidget(m_searchEdit, 1, 1, 1, 3);
 
-    filterBar->addWidget(new QLabel(tr("Cell Size:"), central));
+    auto* zoomRow = new QHBoxLayout();
+    zoomRow->setContentsMargins(0, 0, 0, 0);
+    zoomRow->setSpacing(6);
+    auto* zoomIconLabel = new QLabel(central);
+    zoomIconLabel->setPixmap(loadTintedSvgPixmap(QStringLiteral(":/icons/zoom.svg"), 15));
+    zoomIconLabel->setToolTip(tr("Cell Size (Ctrl++/Ctrl+- or Ctrl+Wheel)"));
+    zoomRow->addWidget(zoomIconLabel);
+    auto* zoomTextLabel = new QLabel(tr("Cell Size:"), central);
+    zoomTextLabel->setToolTip(tr("Cell Size (Ctrl++/Ctrl+- or Ctrl+Wheel)"));
+    zoomRow->addWidget(zoomTextLabel);
     m_zoomSlider = new QSlider(Qt::Horizontal, central);
     m_zoomSlider->setRange(68, 172);
     m_zoomSlider->setValue(104);
-    m_zoomSlider->setFixedWidth(130);
-    filterBar->addWidget(m_zoomSlider);
+    m_zoomSlider->setMinimumWidth(110);
+    zoomRow->addWidget(m_zoomSlider, 1);
+    controlsGrid->addLayout(zoomRow, 1, 4, 1, 2);
 
     m_countLabel = new QLabel(central);
-    m_countLabel->setMinimumWidth(140);
+    m_countLabel->setMinimumWidth(110);
     m_countLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
-    filterBar->addWidget(m_countLabel);
+    controlsGrid->addWidget(m_countLabel, 1, 6);
 
-    rootLayout->addLayout(filterBar);
+    controlsGrid->setColumnStretch(1, 1);
+    controlsGrid->setColumnStretch(3, 3);
+
+    rootLayout->addLayout(controlsGrid);
 
     // Main Splitter: Glyph Grid + Inspector
     auto* splitter = new QSplitter(Qt::Horizontal, central);
@@ -314,28 +364,49 @@ void MainWindow::setupUi() {
 void MainWindow::setupMenusAndToolbar() {
     auto* fileMenu = menuBar()->addMenu(tr("&File"));
 
-    m_newFontAction = fileMenu->addAction(tr("&New Font…"), QKeySequence::New, this,
-                                         &MainWindow::onNewFontClicked);
-    m_openAction = fileMenu->addAction(tr("&Open Font…"), QKeySequence::Open, this,
+    m_newFontAction = fileMenu->addAction(loadTintedSvgIcon(QStringLiteral(":/icons/file-plus.svg")),
+                                          tr("&New Font…"), QKeySequence::New, this,
+                                          &MainWindow::onNewFontClicked);
+    m_newFontAction->setIconText(tr("New"));
+
+    m_openAction = fileMenu->addAction(loadTintedSvgIcon(QStringLiteral(":/icons/folder-open.svg")),
+                                       tr("&Open Font…"), QKeySequence::Open, this,
                                        &MainWindow::onOpenFontClicked);
-    m_saveAction = fileMenu->addAction(tr("&Save Font"), QKeySequence::Save, this,
+    m_openAction->setIconText(tr("Open"));
+
+    m_saveAction = fileMenu->addAction(loadTintedSvgIcon(QStringLiteral(":/icons/save.svg")),
+                                       tr("&Save Font"), QKeySequence::Save, this,
                                        &MainWindow::onSaveFontClicked);
-    m_saveAsAction = fileMenu->addAction(tr("Save Font &As…"),
+    m_saveAction->setIconText(tr("Save"));
+
+    m_saveAsAction = fileMenu->addAction(loadTintedSvgIcon(QStringLiteral(":/icons/save.svg")),
+                                         tr("Save Font &As…"),
                                          QKeySequence(QStringLiteral("Ctrl+Shift+S")), this,
                                          &MainWindow::onSaveFontAsClicked);
-    m_exportAction = fileMenu->addAction(tr("&Export Font…"), QKeySequence(QStringLiteral("Ctrl+E")),
+
+    m_exportAction = fileMenu->addAction(loadTintedSvgIcon(QStringLiteral(":/icons/file-export.svg")),
+                                         tr("&Export Font…"), QKeySequence(QStringLiteral("Ctrl+E")),
                                          this, &MainWindow::onExportFontClicked);
-    m_importFontAction = fileMenu->addAction(tr("&Import Glyphs from Font…"), this,
+    m_exportAction->setIconText(tr("Export"));
+
+    m_importFontAction = fileMenu->addAction(loadTintedSvgIcon(QStringLiteral(":/icons/font-import.svg")),
+                                             tr("&Import Glyphs from Font…"), this,
                                              &MainWindow::onImportFontClicked);
-    m_closeAction = fileMenu->addAction(tr("&Close Font"), QKeySequence::Close, this,
+    m_importFontAction->setIconText(tr("From Font"));
+
+    m_closeAction = fileMenu->addAction(loadTintedSvgIcon(QStringLiteral(":/icons/file-x.svg")),
+                                        tr("&Close Font"), QKeySequence::Close, this,
                                         &MainWindow::onCloseFontClicked);
+    m_closeAction->setIconText(tr("Close"));
     fileMenu->addSeparator();
     fileMenu->addAction(tr("E&xit"), QKeySequence::Quit, this, &QWidget::close);
 
     auto* editMenu = menuBar()->addMenu(tr("&Edit"));
-    m_copyGlyphsAction = editMenu->addAction(tr("&Copy Selected Glyph(s)"), QKeySequence::Copy, this,
+    m_copyGlyphsAction = editMenu->addAction(loadTintedSvgIcon(QStringLiteral(":/icons/copy.svg")),
+                                             tr("&Copy Selected Glyph(s)"), QKeySequence::Copy, this,
                                              &MainWindow::onCopyGlyphsClicked);
-    m_pasteGlyphsAction = editMenu->addAction(tr("&Paste Glyph(s)"), QKeySequence::Paste, this,
+    m_pasteGlyphsAction = editMenu->addAction(loadTintedSvgIcon(QStringLiteral(":/icons/clipboard.svg")),
+                                              tr("&Paste Glyph(s)"), QKeySequence::Paste, this,
                                               &MainWindow::onPasteGlyphsClicked);
     editMenu->addSeparator();
     editMenu->addAction(tr("&Import Preferences…"), this, [this]() {
@@ -345,25 +416,46 @@ void MainWindow::setupMenusAndToolbar() {
             statusBar()->showMessage(tr("Default import preferences saved"), 4000);
         }
     });
+    m_settingsAction = editMenu->addAction(loadTintedSvgIcon(QStringLiteral(":/icons/settings.svg")),
+                                           tr("&Settings…"), QKeySequence::Preferences, this,
+                                           &MainWindow::onSettingsClicked);
+    m_settingsAction->setIconText(tr("Settings"));
 
     auto* fontMenu = menuBar()->addMenu(tr("F&ont"));
-    m_newGlyphAction = fontMenu->addAction(tr("&New Glyph…"), QKeySequence(QStringLiteral("Ctrl+Shift+N")), this,
-                                           &MainWindow::onNewGlyphClicked);
-    m_moveGlyphsAction = fontMenu->addAction(tr("&Move Selected Glyphs…"),
+    m_newGlyphAction = fontMenu->addAction(loadTintedSvgIcon(QStringLiteral(":/icons/glyph-plus.svg")),
+                                           tr("&New Glyph…"), QKeySequence(QStringLiteral("Ctrl+Shift+N")),
+                                           this, &MainWindow::onNewGlyphClicked);
+    m_newGlyphAction->setIconText(tr("New Glyph"));
+
+    m_moveGlyphsAction = fontMenu->addAction(loadTintedSvgIcon(QStringLiteral(":/icons/move.svg")),
+                                             tr("&Move Selected Glyphs…"),
                                              QKeySequence(QStringLiteral("Ctrl+Shift+M")), this,
                                              &MainWindow::onMoveGlyphsClicked);
-    m_importSvgAction = fontMenu->addAction(tr("&Import SVG / PNG into Glyph…"),
+    m_moveGlyphsAction->setIconText(tr("Move"));
+
+    m_importSvgAction = fontMenu->addAction(loadTintedSvgIcon(QStringLiteral(":/icons/image-import.svg")),
+                                            tr("&Import SVG / PNG into Glyph…"),
                                             QKeySequence(QStringLiteral("Ctrl+I")), this,
                                             &MainWindow::onImportSvgClicked);
-    m_batchImportAction = fontMenu->addAction(tr("&Batch Import Images…"),
+    m_importSvgAction->setIconText(tr("Import"));
+
+    m_batchImportAction = fontMenu->addAction(loadTintedSvgIcon(QStringLiteral(":/icons/layers-import.svg")),
+                                              tr("&Batch Import Images…"),
                                               QKeySequence(QStringLiteral("Ctrl+Shift+B")), this,
                                               &MainWindow::onBatchImportClicked);
-    m_fontMetaAction = fontMenu->addAction(tr("Font &Metadata…"),
+    m_batchImportAction->setIconText(tr("Batch"));
+
+    m_fontMetaAction = fontMenu->addAction(loadTintedSvgIcon(QStringLiteral(":/icons/sliders.svg")),
+                                           tr("Font &Metadata…"),
                                            QKeySequence(QStringLiteral("Ctrl+M")), this,
                                            &MainWindow::onEditFontMetadataClicked);
-    m_validateAction = fontMenu->addAction(tr("&Validate Font…"),
+    m_fontMetaAction->setIconText(tr("Metadata"));
+
+    m_validateAction = fontMenu->addAction(loadTintedSvgIcon(QStringLiteral(":/icons/shield-check.svg")),
+                                           tr("&Validate Font…"),
                                            QKeySequence(QStringLiteral("Ctrl+Shift+V")), this,
                                            &MainWindow::onValidateFontClicked);
+    m_validateAction->setIconText(tr("Validate"));
 
     auto* viewMenu = menuBar()->addMenu(tr("&View"));
     viewMenu->addAction(tr("Zoom &In"), QKeySequence::ZoomIn, this,
@@ -377,21 +469,29 @@ void MainWindow::setupMenusAndToolbar() {
         viewMenu->addAction(dock->toggleViewAction());
     }
 
-    auto* toolbar = addToolBar(tr("Main Toolbar"));
-    toolbar->setMovable(false);
-    toolbar->addAction(m_newFontAction);
-    toolbar->addAction(m_openAction);
-    toolbar->addAction(m_saveAction);
-    toolbar->addAction(m_exportAction);
-    toolbar->addAction(m_closeAction);
-    toolbar->addSeparator();
-    toolbar->addAction(m_newGlyphAction);
-    toolbar->addAction(m_moveGlyphsAction);
-    toolbar->addAction(m_importSvgAction);
-    toolbar->addAction(m_batchImportAction);
-    toolbar->addAction(m_importFontAction);
-    toolbar->addAction(m_fontMetaAction);
-    toolbar->addAction(m_validateAction);
+    m_mainToolBar = addToolBar(tr("Main Toolbar"));
+    m_mainToolBar->setMovable(false);
+    m_mainToolBar->setIconSize(QSize(18, 18));
+    m_mainToolBar->addAction(m_newFontAction);
+    m_mainToolBar->addAction(m_openAction);
+    m_mainToolBar->addAction(m_saveAction);
+    m_mainToolBar->addAction(m_exportAction);
+    m_mainToolBar->addAction(m_closeAction);
+    m_mainToolBar->addSeparator();
+    m_mainToolBar->addAction(m_newGlyphAction);
+    m_mainToolBar->addAction(m_moveGlyphsAction);
+    m_mainToolBar->addAction(m_importSvgAction);
+    m_mainToolBar->addAction(m_batchImportAction);
+    m_mainToolBar->addAction(m_importFontAction);
+    m_mainToolBar->addAction(m_fontMetaAction);
+    m_mainToolBar->addAction(m_validateAction);
+
+    auto* toolbarSpacer = new QWidget(m_mainToolBar);
+    toolbarSpacer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+    m_mainToolBar->addWidget(toolbarSpacer);
+    m_mainToolBar->addAction(m_settingsAction);
+
+    applyToolbarDisplayMode(loadToolbarDisplayMode());
 
     m_saveAction->setEnabled(false);
     m_saveAsAction->setEnabled(false);
@@ -1223,11 +1323,15 @@ void MainWindow::applyCurrentAreaFilter() {
         m_rangeEdit->setStyleSheet(QString());
         m_rangeStatusLabel->clear();
         m_rangeStatusLabel->setToolTip(QString());
+        m_rangeStatusLabel->setVisible(false);
         m_model->setRangeFilter(filter);
     } else {
         m_rangeEdit->setStyleSheet(QStringLiteral("QLineEdit { border: 1px solid #d9534f; }"));
-        m_rangeStatusLabel->setText(QStringLiteral("⚠"));
+        m_rangeStatusLabel->setPixmap(
+            loadTintedSvgPixmap(QStringLiteral(":/icons/alert-triangle.svg"), 16,
+                                QColor(QStringLiteral("#d97706"))));
         m_rangeStatusLabel->setToolTip(parseErr);
+        m_rangeStatusLabel->setVisible(true);
     }
     updateWindowTitleAndCounts();
 }
@@ -1304,6 +1408,36 @@ void MainWindow::persistAreaConfigIfOpen(bool showStatus) {
         }
     } else if (showStatus) {
         QMessageBox::warning(this, tr("Save Areas Failed"), err);
+    }
+}
+
+void MainWindow::applyToolbarDisplayMode(ToolbarDisplayMode mode) {
+    if (!m_mainToolBar) {
+        return;
+    }
+    m_mainToolBar->setToolButtonStyle(toQtToolButtonStyle(mode));
+}
+
+void MainWindow::onSettingsClicked() {
+    const ToolbarDisplayMode previousMode = loadToolbarDisplayMode();
+    SettingsDialog dlg(previousMode, this);
+    connect(&dlg, &SettingsDialog::toolbarDisplayModePreview, this,
+            &MainWindow::applyToolbarDisplayMode);
+    connect(&dlg, &SettingsDialog::openImportPreferencesRequested, this, [&dlg, this]() {
+        ImportFilterSettingsDialog importDlg(loadDefaultImportOptions(), &dlg);
+        if (importDlg.exec() == QDialog::Accepted) {
+            saveDefaultImportOptions(importDlg.importOptions());
+            statusBar()->showMessage(tr("Default import preferences saved"), 4000);
+        }
+    });
+
+    if (dlg.exec() == QDialog::Accepted) {
+        const ToolbarDisplayMode chosenMode = dlg.toolbarDisplayMode();
+        saveToolbarDisplayMode(chosenMode);
+        applyToolbarDisplayMode(chosenMode);
+        statusBar()->showMessage(tr("Settings saved"), 3000);
+    } else {
+        applyToolbarDisplayMode(previousMode);
     }
 }
 

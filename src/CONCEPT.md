@@ -35,6 +35,7 @@ The UI is designed to be simple and easy to use.
 
 - Cross Platform: Linux first (Ubuntu 26.04), Windows later (cross-compile)
 - **C++20 + Qt 6 Widgets** (`QListView` + `QPainterPath` delegate for grid preview, `QGraphicsView` planned for v0.4 outline editor; QML was evaluated and intentionally rejected in favor of Widgets for complex desktop tables/dialogs and vector editing)
+- **Icons (`Qt6::Svg` + `IconUtils`, no direct `qsvgicon` / `Qt6::SvgWidgets`):** Embedded monochrome SVGs (`src/resources/icons/*.svg`) use `currentColor`, which Qt's default SVG renderer does not resolve against `QPalette`. `IconUtils` replaces `currentColor` with active/disabled `QPalette::ButtonText` and renders multi-size pixmaps via `QSvgRenderer` (`Qt6::Svg`). This ensures reliable dark/light theme tinting across Linux and Windows without depending on runtime `iconengines/qsvgicon` plugins or heavier `QSvgWidget` (`Qt6::SvgWidgets`) instances (which cannot be assigned to `QAction`/`QMenu`/`QToolBar`).
 
 ### Implementation Notes & Open Questions
 - [x] **Font importing (`v0.1`):** `LoadSplineFont` + `FVAppend(_FontViewCreate(...))` via `FontForgeBridge`, plus Drag & Drop of font files into the empty `GlyphGridView`
@@ -107,9 +108,10 @@ The UI is designed to be simple and easy to use.
     - interactive GUI dialog (`File -> Import Glyphs from Font...`) with debounced collision analysis, range selection, EM scaling, and advance width copying
     - command line options (`--merge-font`, `--source-range`, `--target-start`, `--no-scale-to-em`, `--no-copy-metrics`, `--overwrite`) with comprehensive English reference in `CLI.md`
 
-### v0.5.4
-- [ ] Icons in menu bar (based on font or SVG ?)
-- [ ] Layout improvemements in Toolbar / Menu bar (corectly layout them in raster or grid )
+#### v0.5.4 (Implemented)
+- [x] Theme-aware monochrome SVG icons (`src/resources/icons/*.svg` via `resources.qrc` + `IconUtils`) in main toolbar, menus, and recognizable filter bar controls (`+`, `-`, `Find`, `Save`, `Cell Size`, range warning)
+- [x] Unified `QGridLayout` alignment for Custom Glyph Area, Unicode Ranges, Find Glyph, and Cell Size bars in `MainWindow`
+- [x] Application Settings dialog (`SettingsDialog`, `Edit -> Settings…` / `Ctrl+,` + right-aligned toolbar button) with persistent toolbar display mode (`Icons and Text (Beside/Under)`, `Icons Only`, `Text Only`) via `QSettings`
 
 #### v0.6
 - [ ] Edit Glyph outline and vectors (simple and easy to use graphical editor)

@@ -1,0 +1,25 @@
+<RCC>
+    <qresource prefix="/icons">
+        <file alias="file-plus.svg">icons/file-plus.svg</file>
+        <file alias="folder-open.svg">icons/folder-open.svg</file>
+        <file alias="save.svg">icons/save.svg</file>
+        <file alias="file-export.svg">icons/file-export.svg</file>
+        <file alias="file-x.svg">icons/file-x.svg</file>
+        <file alias="glyph-plus.svg">icons/glyph-plus.svg</file>
+        <file alias="move.svg">icons/move.svg</file>
+        <file alias="image-import.svg">icons/image-import.svg</file>
+        <file alias="layers-import.svg">icons/layers-import.svg</file>
+        <file alias="font-import.svg">icons/font-import.svg</file>
+        <file alias="sliders.svg">icons/sliders.svg</file>
+        <file alias="shield-check.svg">icons/shield-check.svg</file>
+        <file alias="settings.svg">icons/settings.svg</file>
+        <file alias="plus.svg">icons/plus.svg</file>
+        <file alias="minus.svg">icons/minus.svg</file>
+        <file alias="search.svg">icons/search.svg</file>
+        <file alias="zoom.svg">icons/zoom.svg</file>
+        <file alias="copy.svg">icons/copy.svg</file>
+        <file alias="clipboard.svg">icons/clipboard.svg</file>
+        <file alias="alert-triangle.svg">icons/alert-triangle.svg</file>
+    </qresource>
+</RCC>
+

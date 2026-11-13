@@ -56,7 +56,9 @@ Modern cross-platform Qt 6 Widgets GUI for FontForge, built directly on headless
   - `UnicodeRangeFilter` & `CustomGlyphAreaConfig`: Sidecar persistence and Unicode range definitions (including SPUA-A/B).
   - `GlyphListModel`: `QAbstractListModel` virtualized data provider.
 - `ui/` — 
-  - `MainWindow`: Main ribbon, menus, zoom controls, and dock panels.
+  - `MainWindow`: Unified `QGridLayout` area/filter bar, theme-aware SVG toolbar/menu icons, zoom controls, and dock panels.
+  - `IconUtils` & `resources/resources.qrc`: Embedded monochrome SVG icon loader tinted dynamically to the active Qt palette.
+  - `SettingsDialog`: Application preferences (`Edit -> Settings…` / `Ctrl+,`) for persistent toolbar button display mode (`Icons and Text`, `Icons Only`, `Text Only`).
   - `GlyphGridView` & `GlyphGridDelegate`: Vector cards with Drag & Drop font loading.
   - `NewFontDialog` & `CreateGlyphDialog`: Creation dialogs for fonts and glyphs.
   - `MoveGlyphsDialog`: Debounced multi-glyph code point relocation dialog.
